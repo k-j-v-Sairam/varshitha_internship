@@ -1,39 +1,45 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import React, { useState, useContext } from 'react';
+import { View, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { Text, TextInput, Button, Chip, Appbar, SegmentedButtons } from 'react-native-paper';
+import { useHostel } from '../../context/HostelContext';
 
-const AddNotice = ({ navigation, route }) => {
+const AddNotice = ({ navigation }) => {
+const { addNotice } = useHostel();  
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('General');
   const [priority, setPriority] = useState('Low');
+  const [loading, setLoading] = useState(false); // Add loading state
 
-  // Options for Chips
   const categories = ['Maintenance', 'Payment', 'Event', 'Holiday', 'General'];
 
-  const handlePost = () => {
+  const handlePost = async () => {
     if (!title || !description) {
       Alert.alert('Error', 'Please fill in the title and description.');
       return;
     }
 
-    // Create the new notice object
-    const newNotice = {
-      id: Date.now().toString(), // Unique ID
-      title,
-      description,
-      priority,
-      type: category,
-      date: `Posted: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
-      active: true,
-    };
+    setLoading(true);
 
-    // Call the function passed from the previous screen
-    if (route.params?.addNewNotice) {
-        route.params.addNewNotice(newNotice);
+    try {
+      // Create the notice data (ID and timestamp are handled by Context/Firebase now)
+      const noticeData = {
+        title,
+        description,
+        priority,
+        type: category,
+        // formatted string for quick UI display (optional, but keeps your current UI intact)
+        displayDate: `Posted: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
+      };
+
+      await addNotice(noticeData); // Push to Firebase
+      navigation.goBack();
+      
+    } catch (error) {
+      Alert.alert("Error", "Could not post notice. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    navigation.goBack();
   };
 
   return (
@@ -44,8 +50,6 @@ const AddNotice = ({ navigation, route }) => {
       </Appbar.Header>
 
       <ScrollView contentContainerStyle={styles.content}>
-        
-        {/* Title Input */}
         <Text style={styles.label}>Notice Title</Text>
         <TextInput
           mode="outlined"
@@ -55,7 +59,6 @@ const AddNotice = ({ navigation, route }) => {
           style={styles.input}
         />
 
-        {/* Category Selection */}
         <Text style={styles.label}>Category</Text>
         <View style={styles.chipRow}>
             {categories.map((cat) => (
@@ -71,7 +74,6 @@ const AddNotice = ({ navigation, route }) => {
             ))}
         </View>
 
-        {/* Priority Selection */}
         <Text style={styles.label}>Priority Level</Text>
         <SegmentedButtons
           value={priority}
@@ -84,7 +86,6 @@ const AddNotice = ({ navigation, route }) => {
           style={styles.segment}
         />
 
-        {/* Description Input */}
         <Text style={styles.label}>Description</Text>
         <TextInput
           mode="outlined"
@@ -96,16 +97,15 @@ const AddNotice = ({ navigation, route }) => {
           style={styles.textArea}
         />
 
-        {/* Submit Button */}
         <Button 
             mode="contained" 
             onPress={handlePost} 
             style={styles.button}
             contentStyle={{ height: 50 }}
+            disabled={loading}
         >
-            Post Notice
+            {loading ? <ActivityIndicator color="#fff" /> : "Post Notice"}
         </Button>
-
       </ScrollView>
     </View>
   );

@@ -1,48 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
-import { Text, Card, Button, Chip, IconButton, Appbar, Surface, Searchbar } from 'react-native-paper';
+import { Text, Card, Button, IconButton, Appbar, Searchbar } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-
+import { useHostel } from '../../context/HostelContext';
 const NoticeBoardScreen = ({ navigation }) => {
-  
-  // Initial Data
-  const [notices, setNotices] = useState([
-    {
-      id: '1',
-      title: 'Water Supply Maintenance',
-      description: 'Water supply will be temporarily interrupted on Dec 15th.',
-      date: 'Posted: 12 Dec, 10:00 AM',
-      priority: 'High',
-      type: 'Maintenance',
-    },
-    {
-      id: '2',
-      title: 'Pongal Holiday Celebration',
-      description: 'Lunch in mess hall on Jan 14th.',
-      date: 'Posted: 10 Jan, 06:00 PM',
-      priority: 'Low',
-      type: 'Event',
-    },
-    {
-      id: '3',
-      title: 'Rent Payment Reminder',
-      description: 'Please clear dues by 5th.',
-      date: 'Posted: 01 Jan, 09:00 AM',
-      priority: 'Medium',
-      type: 'Payment',
-    },
-  ]);
-
+  // Pull data and functions directly from Context!
+const { notices, fetchNotices, deleteNotice } = useHostel();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('All'); // 'All', 'High', 'Event' (Holidays), 'Payment' (Reminders)
+  const [activeFilter, setActiveFilter] = useState('All'); 
 
-  // Function to Add a Notice
-  const addNewNotice = (newNotice) => {
-    setNotices([newNotice, ...notices]);
-  };
+  // Fetch notices when screen mounts
+  useEffect(() => {
+    fetchNotices();
+  }, []);
 
-  // Function to Delete a Notice
-  const deleteNotice = (id) => {
+  const handleDelete = (id) => {
     Alert.alert(
         "Delete Notice",
         "Are you sure you want to remove this?",
@@ -51,9 +23,7 @@ const NoticeBoardScreen = ({ navigation }) => {
             { 
                 text: "Delete", 
                 style: "destructive", 
-                onPress: () => {
-                    setNotices((currentNotices) => currentNotices.filter((n) => n.id !== id));
-                }
+                onPress: () => deleteNotice(id) // Call context function
             }
         ]
     );
@@ -61,34 +31,30 @@ const NoticeBoardScreen = ({ navigation }) => {
 
   const getPriorityColor = (priority) => {
     switch (priority) {
-      case 'High': return '#D32F2F'; // Red
-      case 'Medium': return '#FB8C00'; // Orange
-      default: return '#388E3C'; // Green
+      case 'High': return '#D32F2F'; 
+      case 'Medium': return '#FB8C00'; 
+      default: return '#388E3C'; 
     }
   };
 
-  // --- Filtering Logic ---
+  // --- Filtering Logic (Uses Context data now) ---
   const filteredNotices = notices.filter((n) => {
-    // 1. Search Filter
     const matchesSearch = n.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           n.description.toLowerCase().includes(searchQuery.toLowerCase());
     
-    // 2. Category/Priority Filter
     let matchesCategory = true;
     if (activeFilter === 'High') matchesCategory = n.priority === 'High';
     if (activeFilter === 'Event') matchesCategory = n.type === 'Event' || n.type === 'Holiday';
-    if (activeFilter === 'Payment') matchesCategory = n.type === 'Payment'; // Reminders usually relate to payment
+    if (activeFilter === 'Payment') matchesCategory = n.type === 'Payment'; 
 
     return matchesSearch && matchesCategory;
   });
 
-  // Dynamic Counts
   const activeCount = notices.length;
   const highCount = notices.filter(n => n.priority === 'High').length;
   const holidayCount = notices.filter(n => n.type === 'Event' || n.type === 'Holiday').length;
   const reminderCount = notices.filter(n => n.type === 'Payment').length;
 
-  // Reusable Clickable Stat Card
   const StatCard = ({ icon, count, label, color, filterKey }) => {
     const isActive = activeFilter === filterKey;
     return (
@@ -114,36 +80,32 @@ const NoticeBoardScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <Appbar.Header style={styles.header}>
         <Appbar.BackAction onPress={() => navigation.goBack()} />
         <Appbar.Content title="Notices & Alerts" titleStyle={styles.headerTitle} />
       </Appbar.Header>
 
       <ScrollView contentContainerStyle={styles.content}>
-        
-        {/* Search Bar */}
         <Searchbar
           placeholder="Search notices..."
           onChangeText={setSearchQuery}
           value={searchQuery}
           style={styles.searchBar}
-          inputStyle={{ fontSize: 14 }} // Fix for text alignment in search
+          inputStyle={{ fontSize: 14 }}
         />
 
-        {/* New Notice Button */}
         <Button 
           mode="contained" 
           icon="plus" 
           style={styles.createButton}
           contentStyle={{ height: 48 }}
           labelStyle={{ fontSize: 16, fontWeight: 'bold' }}
-          onPress={() => navigation.navigate('AddNotice', { addNewNotice })} 
+          // Notice we don't pass `addNewNotice` in params anymore!
+          onPress={() => navigation.navigate('AddNotice')} 
         >
           New Notice
         </Button>
 
-        {/* Filter Grid */}
         <View style={styles.statsGrid}>
             <StatCard icon="bell-ring" count={activeCount} label="All Active" color="#2196F3" filterKey="All" />
             <StatCard icon="alert-circle" count={highCount} label="High Prio" color="#D32F2F" filterKey="High" />
@@ -162,7 +124,6 @@ const NoticeBoardScreen = ({ navigation }) => {
             )}
         </View>
 
-        {/* List of Notices */}
         {filteredNotices.length === 0 ? (
             <View style={{ alignItems: 'center', marginTop: 40 }}>
                 <MaterialCommunityIcons name="clipboard-text-off-outline" size={48} color="#ddd" />
@@ -173,7 +134,6 @@ const NoticeBoardScreen = ({ navigation }) => {
                 <Card key={item.id} style={styles.noticeCard}>
                     <View style={styles.cardHeader}>
                         <View style={styles.headerLeft}>
-                            {/* Icon Circle */}
                             <View style={[styles.typeIcon, { backgroundColor: getPriorityColor(item.priority) + '15' }]}>
                                 <MaterialCommunityIcons 
                                     name={item.priority === 'High' ? 'alert' : 'information'} 
@@ -185,7 +145,6 @@ const NoticeBoardScreen = ({ navigation }) => {
                             <View style={{ marginLeft: 10, flex: 1 }}>
                                 <Text style={styles.noticeTitle}>{item.title}</Text>
                                 
-                                {/* FIXED CHIP ROW */}
                                 <View style={styles.chipContainer}>
                                     <View style={[styles.chipBase, { backgroundColor: getPriorityColor(item.priority) + '20' }]}>
                                         <Text style={[styles.chipText, { color: getPriorityColor(item.priority) }]}>{item.priority}</Text>
@@ -198,13 +157,12 @@ const NoticeBoardScreen = ({ navigation }) => {
                             </View>
                         </View>
 
-                        {/* Delete Button */}
                         <IconButton 
                             icon="delete-outline" 
                             size={20} 
                             iconColor="#9E9E9E" 
                             style={{ margin: 0 }}
-                            onPress={() => deleteNotice(item.id)} 
+                            onPress={() => handleDelete(item.id)} 
                         />
                     </View>
 
@@ -212,13 +170,13 @@ const NoticeBoardScreen = ({ navigation }) => {
                         <Text style={styles.description}>{item.description}</Text>
                         <View style={styles.cardFooter}>
                             <MaterialCommunityIcons name="clock-time-four-outline" size={14} color="#9E9E9E" />
-                            <Text style={styles.dateText}> {item.date}</Text>
+                            {/* Uses the displayDate we generated during upload */}
+                            <Text style={styles.dateText}> {item.displayDate || 'Recently'}</Text>
                         </View>
                     </Card.Content>
                 </Card>
             ))
         )}
-
       </ScrollView>
     </View>
   );
@@ -261,7 +219,6 @@ const styles = StyleSheet.create({
   typeIcon: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
   noticeTitle: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 6 },
   
-  // Custom Chip Styles for Perfect Alignment
   chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chipBase: { 
       paddingHorizontal: 8, 

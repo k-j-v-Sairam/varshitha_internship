@@ -1,31 +1,27 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, StatusBar, ScrollView, Modal, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, StyleSheet, FlatList, TouchableOpacity, StatusBar, ScrollView, Modal, Alert, RefreshControl } from 'react-native';
 import { Text, Surface, IconButton, Searchbar, FAB, Avatar, Badge, Chip, useTheme, TextInput as PaperInput, Button, Divider } from 'react-native-paper';
-
-// 1. Mock Data
-const initialStaff = [
-  { id: '1', name: 'Ramesh Kumar', role: 'Warden', block: 'A', staffId: 'WRD-001', status: 'Paid', attendance: 'Present', isTaker: true, salary: '18000', shift: 'Day', phone: '9876543210' },
-  { id: '2', name: 'Sunita Devi', role: 'Cleaning', block: 'B', staffId: 'CLN-102', status: 'Pending', attendance: 'Absent', isTaker: false, salary: '8000', shift: 'Morning', phone: '9876543211' },
-  { id: '3', name: 'Bahadur Singh', role: 'Security', block: 'General', staffId: 'SEC-201', status: 'Paid', attendance: 'Present', isTaker: false, salary: '12000', shift: 'Night', phone: '9876543212' },
-  { id: '4', name: 'Rajesh', role: 'Cook', block: 'A', staffId: 'CK-301', status: 'Pending', attendance: 'Present', isTaker: false, salary: '15000', shift: 'Day', phone: '9876543213' },
-  { id: '5', name: 'Lakshmi', role: 'Cleaning', block: 'C', staffId: 'CLN-103', status: 'Paid', attendance: 'Present', isTaker: false, salary: '8500', shift: 'Evening', phone: '9876543214' },
-];
+import firestore from '@react-native-firebase/firestore'; 
+import auth from '@react-native-firebase/auth'; // 🔥 IMPORT ADDED FOR SECURITY
 
 const StaffManagement = ({ navigation }) => {
   const theme = useTheme();
   
   // --- STATE ---
   const [searchQuery, setSearchQuery] = useState('');
-  const [staffData, setStaffData] = useState(initialStaff);
-  const [roles, setRoles] = useState(['All', 'Warden', 'Security', 'Cook', 'Cleaning']);
+  const [staffData, setStaffData] = useState([]); 
+  const [blocks, setBlocks] = useState(['All']); 
+  const [roles, setRoles] = useState(['All', 'Warden', 'Security', 'Cook', 'Cleaning', 'Care Taker']);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false); 
   
   // Filters
   const [roleFilter, setRoleFilter] = useState('All'); 
   const [blockFilter, setBlockFilter] = useState('All'); 
-  const [attendanceFilter, setAttendanceFilter] = useState('All'); // 'All', 'Present', 'Absent'
-  const [statusFilter, setStatusFilter] = useState('All'); // 'All', 'Paid', 'Pending'
+  const [attendanceFilter, setAttendanceFilter] = useState('All'); 
+  const [statusFilter, setStatusFilter] = useState('All'); 
   
-  // NEW: Care Taker Filter State
+  // Care Taker Filter State
   const [takerFilter, setTakerFilter] = useState(false); 
 
   // Modals
@@ -34,28 +30,101 @@ const StaffManagement = ({ navigation }) => {
   const [isSalaryModalVisible, setSalaryModalVisible] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
 
+  // --- DATA FETCHING (REAL-TIME FIREBASE LISTENERS) ---
+  useEffect(() => {
+    setLoading(true);
+    const currentOwnerId = auth().currentUser?.uid;
+
+    if (!currentOwnerId) {
+      setLoading(false);
+      return;
+    }
+
+    // 1. Real-time listener for Dynamic Blocks (🔥 ISOLATED TO OWNER)
+    const unsubscribeBlocks = firestore().collection('blocks')
+      .where('ownerId', '==', currentOwnerId)
+      .onSnapshot(
+        (blockSnapshot) => {
+          if (blockSnapshot) {
+            const fetchedBlocks = blockSnapshot.docs.map(doc => {
+              const data = doc.data();
+              return data.name || data.hostelName || data.blockName || `Block ${doc.id}`;
+            });
+            // Added 'Unassigned' to the block filters list
+            setBlocks(['All', 'Unassigned', ...fetchedBlocks]);
+          }
+        },
+        (error) => console.error("Error fetching blocks: ", error)
+      );
+
+    // 2. Real-time listener for Staff Data (🔥 ISOLATED TO OWNER)
+    // This makes sure deleted staff disappear instantly!
+    const unsubscribeStaff = firestore().collection('staff')
+      .where('ownerId', '==', currentOwnerId)
+      .onSnapshot(
+        (staffSnapshot) => {
+          if (staffSnapshot) {
+            const fetchedStaff = staffSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setStaffData(fetchedStaff);
+          }
+          setLoading(false);
+        },
+        (error) => {
+          console.error("Error fetching staff: ", error);
+          Alert.alert("Network Error", "Could not fetch real-time data.");
+          setLoading(false);
+        }
+      );
+
+    // Cleanup listeners when component unmounts
+    return () => {
+      unsubscribeBlocks();
+      unsubscribeStaff();
+    };
+  }, []);
+
+  // Pull-to-Refresh Handler (🔥 ISOLATED TO OWNER)
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const currentOwnerId = auth().currentUser?.uid;
+      if (currentOwnerId) {
+        const staffSnapshot = await firestore().collection('staff')
+          .where('ownerId', '==', currentOwnerId)
+          .get();
+        const fetchedStaff = staffSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setStaffData(fetchedStaff);
+      }
+    } catch (e) {
+      console.log(e);
+    }
+    setRefreshing(false);
+  }, []);
+
   // --- LOGIC: FILTERING ---
   const filteredStaff = staffData.filter(staff => {
-    const matchesSearch = staff.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          staff.staffId.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === 'All' ? true : staff.role === roleFilter;
-    
-    // IF Taker Filter is ON, ignore Block Filter (show takers from all blocks)
-    // ELSE apply Block Filter normally
-    const matchesBlock = takerFilter ? true : (blockFilter === 'All' ? true : staff.block === blockFilter);
+    const staffName = staff?.name || '';
+    const staffIdStr = staff?.staffId || '';
 
-    // Taker Filter
+    const matchesSearch = staffName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          staffIdStr.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesRole = roleFilter === 'All' ? true : 
+      (Array.isArray(staff.roles) ? staff.roles.includes(roleFilter) : staff.role === roleFilter);
+    
+    // Safely handle unassigned blocks for the filter
+    const safeBlock = staff.block || 'Unassigned';
+    const matchesBlock = takerFilter ? true : (blockFilter === 'All' ? true : safeBlock === blockFilter);
+    
     const matchesTaker = takerFilter ? staff.isTaker === true : true;
 
-    // Attendance Filter
     let matchesAttendance = true;
     if (attendanceFilter === 'Present') matchesAttendance = staff.attendance === 'Present';
     if (attendanceFilter === 'Absent') matchesAttendance = staff.attendance === 'Absent';
 
-    // Salary Filter
     let matchesStatus = true;
     if (statusFilter === 'Paid') matchesStatus = staff.status === 'Paid';
-    if (statusFilter === 'Pending') matchesStatus = staff.status === 'Pending';
+    if (statusFilter === 'Pending') matchesStatus = staff.status === 'Pending' || staff.status === 'Due';
 
     return matchesSearch && matchesRole && matchesBlock && matchesAttendance && matchesStatus && matchesTaker;
   });
@@ -63,10 +132,10 @@ const StaffManagement = ({ navigation }) => {
   // Calculate Stats
   const totalStaff = staffData.length;
   const paidCount = staffData.filter(s => s.status === 'Paid').length;
-  const pendingCount = staffData.filter(s => s.status === 'Pending').length; // Kept for Salary Modal calculation
+  const pendingCount = staffData.filter(s => s.status === 'Pending' || s.status === 'Due').length;
   const presentCount = staffData.filter(s => s.attendance === 'Present').length;
   const absentCount = staffData.filter(s => s.attendance === 'Absent').length;
-  const takerCount = staffData.filter(s => s.isTaker === true).length; // Count of Care Takers
+  const takerCount = staffData.filter(s => s.isTaker === true).length;
 
   const getStatusColor = (status) => (status === 'Paid' ? '#10B981' : '#F59E0B');
 
@@ -79,8 +148,14 @@ const StaffManagement = ({ navigation }) => {
   const handleLongPress = (staffId, name, currentStatus, block) => {
     Alert.alert("Manage Permissions", `Assign ${name} as Attendance Taker?`, [
         { text: "Cancel", style: "cancel" },
-        { text: currentStatus ? "Remove" : "Assign", onPress: () => {
-             setStaffData(prev => prev.map(s => s.id === staffId ? { ...s, isTaker: !s.isTaker } : s));
+        { text: currentStatus ? "Remove" : "Assign", onPress: async () => {
+             // Real Firebase Update (Real-time listener will auto-update the UI!)
+             try {
+               await firestore().collection('staff').doc(staffId).update({ isTaker: !currentStatus });
+             } catch (error) {
+               console.error("Failed to update Taker status:", error);
+               Alert.alert("Error", "Could not update permissions.");
+             }
         }}
     ]);
   };
@@ -94,7 +169,7 @@ const StaffManagement = ({ navigation }) => {
 
   // Salary UI
   const salLabel = statusFilter === 'Pending' ? 'Salary Due' : (statusFilter === 'Paid' ? 'Paid Staff' : 'Salary');
-  const salCount = statusFilter === 'Pending' ? pendingCount : (statusFilter === 'Paid' ? paidCount : paidCount); // Default to paid count or total if preferred
+  const salCount = statusFilter === 'Pending' ? pendingCount : paidCount; 
   const salColor = statusFilter === 'Pending' ? '#F59E0B' : '#10B981';
 
   const renderStatCard = (title, count, icon, color, onPress, isActive) => (
@@ -128,14 +203,14 @@ const StaffManagement = ({ navigation }) => {
 
       <View style={styles.contentContainer}>
         
-        {/* FILTERS - Block Filter FADES when Taker Filter is Active */}
+        {/* DYNAMIC BLOCK FILTERS */}
         <View style={[styles.filterRow, takerFilter && { opacity: 0.3 }]}> 
           <Text style={styles.filterLabel}>Block:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} scrollEnabled={!takerFilter}>
-            {['All', 'A', 'B', 'C', 'General'].map((block) => (
+            {blocks.map((block) => (
               <Chip 
                 key={block} mode="flat" selected={blockFilter === block} 
-                onPress={() => !takerFilter && setBlockFilter(block)} // Disable press if taker filter is on
+                onPress={() => !takerFilter && setBlockFilter(block)} 
                 style={[styles.chip, blockFilter === block && { backgroundColor: '#4F46E5' }]}
                 textStyle={{ color: blockFilter === block ? '#fff' : '#4F46E5' }}
               >
@@ -145,6 +220,7 @@ const StaffManagement = ({ navigation }) => {
           </ScrollView>
         </View>
 
+        {/* ROLE FILTERS */}
         <View style={styles.filterRow}>
           <Text style={styles.filterLabel}>Role:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -166,29 +242,23 @@ const StaffManagement = ({ navigation }) => {
         {/* STATS ROW */}
         <View style={styles.statsRow}>
           {renderStatCard('Total Staff', totalStaff, 'account-tie', '#CF6679', () => {
-             // Reset all specific filters
              setTakerFilter(false); setStatusFilter('All'); setAttendanceFilter('All');
           }, !takerFilter && statusFilter === 'All' && attendanceFilter === 'All')}
           
-          {/* Attendance Card */}
           {renderStatCard(attLabel, attCount, attIcon, attColor, () => {
-             setTakerFilter(false); // Reset taker filter if active
+             setTakerFilter(false); 
              setAttendanceModalVisible(true);
           }, attendanceFilter !== 'All')}
         </View>
         
         <View style={styles.statsRow}>
-          {/* Salary Card (Combined Paid/Due logic from previous request) */}
           {renderStatCard(salLabel, salCount, 'cash-multiple', salColor, () => {
-             setTakerFilter(false); // Reset taker filter if active
+             setTakerFilter(false); 
              setSalaryModalVisible(true);
           }, statusFilter !== 'All')}
 
-          {/* NEW: CARE TAKERS FILTER (Replaced the old 4th card) */}
           {renderStatCard('Care Takers', takerCount, 'clipboard-account', '#9C27B0', () => {
-             setTakerFilter(!takerFilter); // Toggle logic
-             // Optional: Reset other filters to avoid confusion? 
-             // For now, let's just enable this mode.
+             setTakerFilter(!takerFilter); 
           }, takerFilter)}
         </View>
 
@@ -198,14 +268,35 @@ const StaffManagement = ({ navigation }) => {
           style={styles.searchBar} inputStyle={styles.searchInput} iconColor="#6B7280" elevation={1}
         />
 
-        {/* LIST */}
+        {/* LIST WITH PULL TO REFRESH */}
         <FlatList
           data={filteredStaff}
           keyExtractor={item => item.id}
           contentContainerStyle={{ paddingBottom: 80 }}
           showsVerticalScrollIndicator={false}
-          ListEmptyComponent={<Text style={styles.emptyText}>No staff found.</Text>}
-          renderItem={({ item }) => (
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#CF6679"]} />
+          }
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>
+              {loading ? "Loading staff..." : "No staff found. Tap the + button to add."}
+            </Text>
+          }
+          renderItem={({ item }) => {
+            const roleDisplay = Array.isArray(item.roles) ? item.roles.join(', ') : item.role;
+            
+            // --- FIX FOR REQUIREMENT 3: Safe Block Name Display & UI Truncation ---
+            let blockDisplay = item.block;
+            if (!blockDisplay || blockDisplay === 'Unassigned') {
+               blockDisplay = 'Unassigned';
+            } else if (blockDisplay.length > 15) {
+               // Truncate long Firebase IDs so they don't break the UI
+               blockDisplay = `Block ${blockDisplay.substring(0, 5)}...`; 
+            } else {
+               blockDisplay = `Block ${blockDisplay}`;
+            }
+
+            return (
             <TouchableOpacity 
               onPress={() => navigation.navigate('StaffDetails', { staff: item })}
               onLongPress={() => handleLongPress(item.id, item.name, item.isTaker, item.block)}
@@ -221,7 +312,8 @@ const StaffManagement = ({ navigation }) => {
                     />
                     <View style={[styles.attendanceDot, { backgroundColor: item.attendance === 'Present' ? '#10B981' : '#EF4444' }]} />
                   </View>
-                  <View style={styles.cardInfo}>
+                  {/* Added flex: 1 here to ensure text truncates instead of stretching the card */}
+                  <View style={[styles.cardInfo, { flex: 1 }]}>
                     <Text style={styles.staffName}>{item.name}</Text>
                     <View style={styles.idContainer}>
                        <Text style={styles.idText}>{item.staffId}</Text>
@@ -231,7 +323,10 @@ const StaffManagement = ({ navigation }) => {
                          </View>
                        )}
                     </View>
-                    <Text style={styles.roleText}>Block {item.block} • {item.role}</Text>
+                    {/* Added numberOfLines={1} to prevent long text from breaking layout */}
+                    <Text style={styles.roleText} numberOfLines={1} ellipsizeMode="tail">
+                      {blockDisplay} • {roleDisplay}
+                    </Text>
                   </View>
                 </View>
                 <View style={styles.cardRight}>
@@ -242,7 +337,7 @@ const StaffManagement = ({ navigation }) => {
                 </View>
               </Surface>
             </TouchableOpacity>
-          )}
+          )}}
         />
       </View>
 
@@ -306,7 +401,14 @@ const StaffManagement = ({ navigation }) => {
         </View>
       </Modal>
 
-      <FAB icon="plus" style={styles.fab} color="#fff" label="Add Staff" onPress={() => {}} />
+      {/* ADD STAFF FAB */}
+      <FAB 
+        icon="plus" 
+        style={styles.fab} 
+        color="#fff" 
+        label="Add Staff" 
+        onPress={() => navigation.navigate('AddStaff')} 
+      />
     </View>
   );
 };
@@ -329,13 +431,16 @@ const styles = StyleSheet.create({
   searchBar: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 20, height: 45 },
   searchInput: { fontSize: 14, alignSelf: 'center' },
   staffCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 16, marginBottom: 12 },
-  cardLeft: { flexDirection: 'row', alignItems: 'center' },
+  
+  // Adjusted styles for UI Truncation
+  cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 },
   cardInfo: { marginLeft: 12 },
   staffName: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
   idContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   idText: { fontSize: 13, fontWeight: 'bold', color: '#4B5563' },
   roleText: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
-  cardRight: { alignItems: 'flex-end' },
+  cardRight: { alignItems: 'flex-end', minWidth: 60 },
+  
   amountText: { fontSize: 16, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
   statusText: { fontSize: 12, fontWeight: 'bold' }, 
   emptyText: { textAlign: 'center', color: '#9CA3AF', marginTop: 20 },
