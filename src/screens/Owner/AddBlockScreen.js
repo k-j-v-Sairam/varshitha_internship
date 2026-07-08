@@ -2,12 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, SafeAreaView, KeyboardAvoidingView, Platform, TouchableOpacity, Alert } from 'react-native';
 import { Text, TextInput, Button, Surface, IconButton, SegmentedButtons, Chip } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useHostel } from '../../context/HostelContext';
-
-const colors = {
-  primary: '#6200EE', background: '#F8FAFC', cardBg: '#FFFFFF', 
-  textDark: '#1E293B', textLight: '#64748B', success: '#10B981', border: '#E2E8F0'
-};
+import { useBlocks, usePricing, useAddBlock, useUpdateBlockDetails } from '../../hooks/useQueries';
+import { Colors } from '../../theme/colors';
 
 const SHARING_OPTIONS = [1, 2, 3, 4, 5];
 
@@ -26,7 +22,10 @@ const AddBlockScreen = ({ navigation, route }) => {
   // 🔥 EXTRACT PARAMS FOR EDIT MODE
   const { isEditMode, blockId, blockName: editBlockName } = route.params || {};
 
-  const { blocks, pricingMatrix, addBlock, updateBlockDetails } = useHostel(); 
+  const { data: blocks = [] } = useBlocks();
+  const { data: pricingMatrix = {} } = usePricing();
+  const addBlockMutation = useAddBlock();
+  const updateBlockDetailsMutation = useUpdateBlockDetails();
   const [loading, setLoading] = useState(false);
 
   // States
@@ -114,13 +113,13 @@ const AddBlockScreen = ({ navigation, route }) => {
     try {
       if (isEditMode) {
         // 🔥 UPDATE EXISTING BLOCK
-        await updateBlockDetails(blockId, blockName.trim(), blockData);
+        await updateBlockDetailsMutation.mutateAsync({ blockId, blockName: blockName.trim(), updatedData: blockData });
         Alert.alert("Success", "Block settings updated successfully!", [
           { text: "OK", onPress: () => navigation.goBack() }
         ]);
       } else {
         // 🔥 CREATE NEW BLOCK
-        await addBlock(blockData); 
+        await addBlockMutation.mutateAsync(blockData); 
         Alert.alert("Success", "Block created and priced successfully!", [
           { text: "OK", onPress: () => navigation.goBack() }
         ]);
@@ -156,8 +155,9 @@ const AddBlockScreen = ({ navigation, route }) => {
               onChangeText={setBlockName} 
               mode="outlined" 
               style={[styles.input, isEditMode && {backgroundColor: '#F1F5F9'}]} 
-              activeOutlineColor={colors.primary} 
-              outlineColor={colors.border}
+              activeOutlineColor={Colors.primary} 
+              outlineColor={Colors.border}
+              textColor="#1A1A1A"
               disabled={isEditMode}
             />
             {isEditMode && <Text style={{fontSize: 11, color: '#EF4444', marginTop: -8, marginBottom: 12, marginLeft: 4}}>* Name cannot be changed after creation.</Text>}
@@ -170,8 +170,9 @@ const AddBlockScreen = ({ navigation, route }) => {
                  keyboardType="number-pad" 
                  mode="outlined" 
                  style={[styles.input, {flex: 1}, isEditMode && {backgroundColor: '#F1F5F9'}]} 
-                 activeOutlineColor={colors.primary} 
-                 outlineColor={colors.border}
+                 activeOutlineColor={Colors.primary} 
+                 outlineColor={Colors.border}
+                 textColor="#1A1A1A"
                  disabled={isEditMode} 
                />
                <TextInput 
@@ -180,8 +181,9 @@ const AddBlockScreen = ({ navigation, route }) => {
                  onChangeText={setArea} 
                  mode="outlined" 
                  style={[styles.input, {flex: 2}]} 
-                 activeOutlineColor={colors.primary} 
-                 outlineColor={colors.border}
+                 activeOutlineColor={Colors.primary} 
+                 outlineColor={Colors.border}
+                 textColor="#1A1A1A"
                />
             </View>
           </Surface>
@@ -198,7 +200,7 @@ const AddBlockScreen = ({ navigation, route }) => {
                 { value: 'Coliving', label: 'Coliving' },
               ]}
               style={{marginBottom: 20}}
-              theme={{ colors: { secondaryContainer: '#E0E7FF' } }}
+              theme={{ colors: { onSurface: Colors.textDark, secondaryContainer: Colors.primaryLight, onSecondaryContainer: Colors.primary } }}
             />
 
             <Text style={styles.fieldLabel}>AC Availability</Text>
@@ -210,7 +212,7 @@ const AddBlockScreen = ({ navigation, route }) => {
                 { value: 'NonAC', label: 'Non-AC' },
                 { value: 'Both', label: 'Both Types' },
               ]}
-              theme={{ colors: { secondaryContainer: '#E0E7FF' } }}
+              theme={{ colors: { onSurface: Colors.textDark, secondaryContainer: Colors.primaryLight, onSecondaryContainer: Colors.primary } }}
             />
           </Surface>
 
@@ -226,8 +228,8 @@ const AddBlockScreen = ({ navigation, route }) => {
                     onPress={() => toggleAmenity(amenity.id)}
                     style={[styles.amenityBox, isSelected && styles.amenityBoxSelected]}
                   >
-                    <Icon name={amenity.icon} size={22} color={isSelected ? colors.primary : colors.textLight} />
-                    <Text style={[styles.amenityLabel, isSelected && {color: colors.primary, fontWeight: '700'}]}>
+                    <Icon name={amenity.icon} size={22} color={isSelected ? Colors.primary : Colors.textLight} />
+                    <Text style={[styles.amenityLabel, isSelected && {color: Colors.primary, fontWeight: '700'}]}>
                       {amenity.label}
                     </Text>
                   </TouchableOpacity>
@@ -247,7 +249,7 @@ const AddBlockScreen = ({ navigation, route }) => {
                   onPress={() => toggleSharing(num)}
                   showSelectedOverlay
                   style={[styles.chip, selectedSharings.includes(num) && styles.chipSelected]}
-                  textStyle={selectedSharings.includes(num) ? {color: '#FFF', fontWeight: 'bold'} : {color: colors.textDark}}
+                  textStyle={selectedSharings.includes(num) ? {color: '#FFF', fontWeight: 'bold'} : {color: Colors.textDark}}
                 >
                   {num}s
                 </Chip>
@@ -259,36 +261,38 @@ const AddBlockScreen = ({ navigation, route }) => {
             <>
               <Text style={styles.sectionHeader}>5. Base Pricing Matrix</Text>
               <Surface style={styles.card} elevation={0}>
-                <Text style={{color: colors.textLight, fontSize: 13, marginBottom: 15}}>
+                <Text style={{color: Colors.textLight, fontSize: 13, marginBottom: 15}}>
                   Set the default monthly rent. This will auto-fill when adding new tenants to this specific block.
                 </Text>
 
                 {selectedSharings.map(sharing => (
                   <View key={sharing} style={{marginBottom: 15}}>
-                    <Text style={{fontWeight: '700', color: colors.textDark, marginBottom: 8}}>{sharing}-Sharing Rooms</Text>
+                    <Text style={{fontWeight: '700', color: Colors.textDark, marginBottom: 8}}>{sharing}-Sharing Rooms</Text>
                     <View style={{flexDirection: 'row', gap: 10}}>
                       
                       {(acType === 'AC' || acType === 'Both') && (
-                        <TextInput 
+                          <TextInput 
                           label="AC Rent (₹)" 
                           keyboardType="number-pad" 
                           mode="outlined" 
                           style={{flex: 1, backgroundColor: '#FFF', height: 45}} 
-                          activeOutlineColor={colors.success}
-                          outlineColor={colors.border}
+                          activeOutlineColor={Colors.success}
+                          outlineColor={Colors.border}
+                          textColor="#1A1A1A"
                           value={pricing[sharing]?.AC?.toString() || ''}
                           onChangeText={(val) => handlePriceChange(sharing, 'AC', val)}
                         />
                       )}
 
                       {(acType === 'NonAC' || acType === 'Both') && (
-                        <TextInput 
+                          <TextInput 
                           label="Non-AC Rent (₹)" 
                           keyboardType="number-pad" 
                           mode="outlined" 
                           style={{flex: 1, backgroundColor: '#FFF', height: 45}} 
-                          activeOutlineColor={colors.success}
-                          outlineColor={colors.border}
+                          activeOutlineColor={Colors.success}
+                          outlineColor={Colors.border}
+                          textColor="#1A1A1A"
                           value={pricing[sharing]?.NonAC?.toString() || ''}
                           onChangeText={(val) => handlePriceChange(sharing, 'NonAC', val)}
                         />
@@ -320,34 +324,34 @@ const AddBlockScreen = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: { backgroundColor: colors.cardBg, paddingTop: 50, paddingBottom: 15, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center' },
-  backBtn: { marginRight: 10, backgroundColor: '#F1F5F9', borderRadius: 12 },
-  headerTitle: { fontSize: 20, fontWeight: '800', color: colors.textDark },
-  headerSubtitle: { fontSize: 13, color: colors.textLight, fontWeight: '500' },
+  container: { flex: 1, backgroundColor: Colors.background },
+  header: { backgroundColor: Colors.cardBg, paddingTop: 50, paddingBottom: 15, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center' },
+  backBtn: { marginRight: 10, backgroundColor: Colors.inputBg, borderRadius: 12 },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: Colors.textDark },
+  headerSubtitle: { fontSize: 13, color: Colors.textLight, fontWeight: '500' },
   scrollContent: { padding: 15 },
-  sectionHeader: { fontSize: 15, fontWeight: 'bold', color: colors.textLight, marginTop: 15, marginBottom: 8, marginLeft: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
-  card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 5, borderWidth: 1, borderColor: colors.border },
-  input: { marginBottom: 12, backgroundColor: '#fff', fontSize: 15 },
-  fieldLabel: { color: colors.textDark, fontSize: 14, fontWeight: '700', marginBottom: 10 },
+  sectionHeader: { fontSize: 15, fontWeight: 'bold', color: Colors.textLight, marginTop: 15, marginBottom: 8, marginLeft: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  card: { backgroundColor: Colors.cardBg, borderRadius: 16, padding: 16, marginBottom: 5, borderWidth: 1, borderColor: Colors.border },
+  input: { marginBottom: 12, backgroundColor: Colors.cardBg, fontSize: 15 },
+  fieldLabel: { color: Colors.textDark, fontSize: 14, fontWeight: '700', marginBottom: 10 },
   chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  chip: { backgroundColor: '#F1F5F9', borderColor: colors.border, borderWidth: 1 },
-  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  submitBtn: { marginTop: 20, borderRadius: 12, backgroundColor: colors.primary, elevation: 4 },
+  chip: { backgroundColor: Colors.inputBg, borderColor: Colors.border, borderWidth: 1 },
+  chipSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  submitBtn: { marginTop: 20, borderRadius: 12, backgroundColor: Colors.primary, elevation: 4 },
   amenitiesGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   amenityBox: { 
     width: '48%', 
     flexDirection: 'row', 
     alignItems: 'center', 
-    backgroundColor: '#F8FAFC', 
+    backgroundColor: Colors.background, 
     padding: 12, 
     borderRadius: 12, 
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#E2E8F0'
+    borderColor: Colors.border
   },
-  amenityBoxSelected: { backgroundColor: '#EEF2FF', borderColor: colors.primary },
-  amenityLabel: { fontSize: 13, color: colors.textDark, fontWeight: '500', marginLeft: 8, flexShrink: 1 }
+  amenityBoxSelected: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  amenityLabel: { fontSize: 13, color: Colors.textDark, fontWeight: '500', marginLeft: 8, flexShrink: 1 }
 });
 
 export default AddBlockScreen;

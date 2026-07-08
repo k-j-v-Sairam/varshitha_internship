@@ -1,0 +1,246 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // HELPER FUNCTIONS FOR SCHEMA VALIDATION
+    // ==========================================
+    // Checks if a field exists; if it does, ensures it is a string and under max length
+    function isStringSafe(data, field, maxLen) {
+      return !data.keys().hasAny([field]) || (data[field] is string && data[field].size() <= maxLen);
+    }
+    
+    // Checks if a field exists; if it does, ensures it is a number
+    function isNumberSafe(data, field) {
+      return !data.keys().hasAny([field]) || (data[field] is number);
+    }
+
+    match /{document=**} {
+      allow read, write: if false; // Default deny
+    }
+
+    // ─────────────────────────────────────────────
+    // USERS
+    // ─────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        request.auth.uid == userId ||
+        (request.resource != null && request.resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.ownerId == request.auth.uid)
+      ) && (
+        request.resource == null || (
+          isStringSafe(request.resource.data, 'email', 200) &&
+          isStringSafe(request.resource.data, 'role', 50) &&
+          isStringSafe(request.resource.data, 'ownerId', 50)
+        )
+      );
+    }
+
+    // ─────────────────────────────────────────────
+    // FCM TOKENS
+    // ─────────────────────────────────────────────
+    match /fcm_tokens/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid &&
+        (request.resource == null || isStringSafe(request.resource.data, 'token', 500));
+    }
+
+    // ─────────────────────────────────────────────
+    // TENANTS
+    // ─────────────────────────────────────────────
+    match /tenants/{tenantId} {
+      allow read: if request.auth != null && (
+        (resource != null && resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.uid == request.auth.uid)
+      );
+      allow create: if request.auth != null &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isStringSafe(request.resource.data, 'name', 150) &&
+        isStringSafe(request.resource.data, 'phone', 20);
+      allow update: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.uid == request.auth.uid
+      ) && (
+        isStringSafe(request.resource.data, 'name', 150) &&
+        isStringSafe(request.resource.data, 'phone', 20)
+      );
+      allow delete: if request.auth != null &&
+        resource.data.ownerId == request.auth.uid;
+    }
+
+    // ─────────────────────────────────────────────
+    // STAFF
+    // ─────────────────────────────────────────────
+    match /staff/{staffId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isStringSafe(request.resource.data, 'name', 150) &&
+        isStringSafe(request.resource.data, 'role', 50);
+      allow update: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid ||
+        staffId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendance'])
+      ) && (
+        isStringSafe(request.resource.data, 'name', 150) &&
+        isStringSafe(request.resource.data, 'role', 50)
+      );
+      allow delete: if request.auth != null &&
+        resource.data.ownerId == request.auth.uid;
+    }
+
+    // ─────────────────────────────────────────────
+    // BLOCKS
+    // ─────────────────────────────────────────────
+    match /blocks/{blockId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        (request.resource != null && request.resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.ownerId == request.auth.uid)
+      ) && (
+        request.resource == null || (
+          isStringSafe(request.resource.data, 'name', 150) &&
+          isNumberSafe(request.resource.data, 'floors')
+        )
+      );
+    }
+
+    // ─────────────────────────────────────────────
+    // ROOMS
+    // ─────────────────────────────────────────────
+    match /rooms/{roomId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        (request.resource != null && request.resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.ownerId == request.auth.uid)
+      ) && (
+        request.resource == null || (
+          isStringSafe(request.resource.data, 'blockName', 150) &&
+          isNumberSafe(request.resource.data, 'floor') &&
+          isNumberSafe(request.resource.data, 'roomNumber') &&
+          isStringSafe(request.resource.data, 'status', 20)
+        )
+      );
+    }
+
+    // ─────────────────────────────────────────────
+    // TRANSACTIONS
+    // ─────────────────────────────────────────────
+    match /transactions/{transactionId} {
+      allow read: if request.auth != null && (
+        (resource != null && resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.tenantUid == request.auth.uid)
+      );
+      allow write: if request.auth != null && (
+        (request.resource != null && request.resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.ownerId == request.auth.uid)
+      ) && (
+        request.resource == null || (
+          isNumberSafe(request.resource.data, 'amount') &&
+          isStringSafe(request.resource.data, 'type', 50)
+        )
+      );
+    }
+
+    // ─────────────────────────────────────────────
+    // BLOCK EXPENSES
+    // ─────────────────────────────────────────────
+    match /block_expenses/{expenseId} {
+      allow read, write: if request.auth != null && (
+        (request.resource != null && request.resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.ownerId == request.auth.uid)
+      ) && (
+        request.resource == null || (
+          isNumberSafe(request.resource.data, 'amount') &&
+          isStringSafe(request.resource.data, 'category', 100)
+        )
+      );
+    }
+
+    // ─────────────────────────────────────────────
+    // NOTICES
+    // ─────────────────────────────────────────────
+    match /notices/{noticeId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isStringSafe(request.resource.data, 'title', 200) &&
+        isStringSafe(request.resource.data, 'content', 5000);
+      allow update, delete: if request.auth != null &&
+        resource.data.ownerId == request.auth.uid &&
+        (request.resource == null || (
+          isStringSafe(request.resource.data, 'title', 200) &&
+          isStringSafe(request.resource.data, 'content', 5000)
+        ));
+    }
+
+    // ─────────────────────────────────────────────
+    // COMPLAINTS
+    // ─────────────────────────────────────────────
+    match /complaints/{complaintId} {
+      allow create: if request.auth != null &&
+        request.resource.data.tenantUid == request.auth.uid &&
+        isStringSafe(request.resource.data, 'title', 200) &&
+        isStringSafe(request.resource.data, 'description', 5000);
+      allow read: if request.auth != null && (
+        (resource != null && resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.tenantUid == request.auth.uid) ||
+        (resource != null && resource.data.assignedToUid == request.auth.uid)
+      );
+      allow update: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.assignedToUid == request.auth.uid
+      ) && (
+        isStringSafe(request.resource.data, 'title', 200) &&
+        isStringSafe(request.resource.data, 'description', 5000)
+      );
+      allow delete: if request.auth != null &&
+        resource.data.ownerId == request.auth.uid;
+    }
+
+    // ─────────────────────────────────────────────
+    // ATTENDANCE LOGS
+    // ─────────────────────────────────────────────
+    match /attendance_logs/{logId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null;
+      allow update, delete: if request.auth != null &&
+        resource.data.ownerId == request.auth.uid;
+    }
+
+    // ─────────────────────────────────────────────
+    // SUPPLY ALERTS
+    // ─────────────────────────────────────────────
+    match /supply_alerts/{alertId} {
+      allow create: if request.auth != null &&
+        isStringSafe(request.resource.data, 'item', 150) &&
+        isStringSafe(request.resource.data, 'note', 1000);
+      allow read: if request.auth != null && (
+        (resource != null && resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.staffUid == request.auth.uid)
+      );
+      allow update: if request.auth != null &&
+        resource.data.ownerId == request.auth.uid;
+      allow delete: if request.auth != null &&
+        resource.data.staffUid == request.auth.uid;
+    }
+
+    // ─────────────────────────────────────────────
+    // MESS MENUS
+    // ─────────────────────────────────────────────
+    match /mess_menus/{menuId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        (request.resource != null && request.resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data.ownerId == request.auth.uid)
+      );
+    }
+
+    // ─────────────────────────────────────────────
+    // SETTINGS
+    // ─────────────────────────────────────────────
+    match /settings/{settingId} {
+      allow read, write: if request.auth != null && settingId.matches('.*_' + request.auth.uid);
+    }
+  }
+}

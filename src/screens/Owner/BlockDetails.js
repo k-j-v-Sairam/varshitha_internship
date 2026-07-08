@@ -1,8 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { Text, Card, Button, IconButton, Surface, ProgressBar, Avatar, Portal, Dialog, TextInput, Switch } from 'react-native-paper'; 
-import firestore from '@react-native-firebase/firestore'; 
-import { useHostel } from '../../context/HostelContext';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
+import { useBlocks, useAddFloor, useDeleteFloor } from '../../hooks/useQueries';
+import SkeletonLoader from '../../components/common/SkeletonLoader';
+import { Colors } from '../../theme/colors';
 
 // Master map to translate amenity IDs back to UI elements
 const AMENITIES_MAP = {
@@ -19,7 +22,10 @@ const AMENITIES_MAP = {
 const BlockDetails = ({ navigation, route }) => {
   const { blockName } = route.params || { blockName: 'Block A' };
   
-  const { blocks, addFloorToBlock, deleteFloor, fetchPricing } = useHostel();
+  const { data: blocks = [], refetch: refetchBlocks } = useBlocks();
+  const addFloorMutation = useAddFloor();
+  const deleteFloorMutation = useDeleteFloor();
+
   const [isGenerating, setIsGenerating] = useState(false);
   
   const [floorStats, setFloorStats] = useState([]);
@@ -42,10 +48,18 @@ const BlockDetails = ({ navigation, route }) => {
 
   const fetchStats = async () => {
     try {
-      const roomsQuery = await firestore().collection('rooms').where('blockName', '==', blockName).get();
+      const ownerId = auth().currentUser?.uid;
+      if (!ownerId) return;
+
+      const roomsQuery = await firestore().collection('rooms')
+        .where('ownerId', '==', ownerId)
+        .where('blockName', '==', blockName)
+        .get();
       const roomsData = roomsQuery.docs.map(doc => doc.data());
-      
-      const tenantsQuery = await firestore().collection('tenants').get();
+
+      const tenantsQuery = await firestore().collection('tenants')
+        .where('ownerId', '==', ownerId)
+        .get();
       const tenantsData = tenantsQuery.docs.map(doc => doc.data());
 
       const blockRoomNumbers = roomsData.map(r => r.roomNumber);
@@ -99,10 +113,10 @@ const BlockDetails = ({ navigation, route }) => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    await refetchBlocks();
     await fetchStats();
-    await fetchPricing(); 
     setRefreshing(false);
-  }, [blockName, floorCount, fetchPricing]);
+  }, [refetchBlocks, blockName, floorCount]);
 
   const handleConfirmAddFloor = async () => {
     if (!blockId) return;
@@ -117,7 +131,7 @@ const BlockDetails = ({ navigation, route }) => {
     setIsGenerating(true);
     
     try {
-      await addFloorToBlock(blockId, blockName, floorCount, numRooms, isACFloor);
+      await addFloorMutation.mutateAsync({ blockId, blockName, currentFloorCount: floorCount, numberOfRooms: numRooms, isACFloor });
       setIsACFloor(false);
       await fetchStats(); 
     } catch (error) {
@@ -135,7 +149,7 @@ const BlockDetails = ({ navigation, route }) => {
   const confirmDeleteFloor = async () => {
     setIsDeleting(true);
     try {
-      await deleteFloor(blockId, blockName, floorToDelete, floorCount);
+      await deleteFloorMutation.mutateAsync({ blockId, blockName, floorId: floorToDelete, currentFloorCount: floorCount });
       setDeleteModalVisible(false);
       setFloorToDelete(null);
       await fetchStats(); 
@@ -153,14 +167,14 @@ const BlockDetails = ({ navigation, route }) => {
       <ScrollView 
         contentContainerStyle={styles.scroll} 
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#6200EE']} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />}
       >
         
         <Card style={styles.infoCard}>
           <Card.Content>
             <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
-              <View>
-                <Text variant="headlineSmall" style={styles.boldText}>{blockName}</Text>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text variant="headlineSmall" style={styles.boldText} numberOfLines={2}>{blockName}</Text>
                 <View style={styles.locationContainer}>
                    <IconButton icon="map-marker" size={16} iconColor="#E91E63" style={{margin:0}}/>
                    <Text variant="bodySmall" style={styles.locationText}>{currentBlock?.area ||             'Location not specified'}</Text>
@@ -172,7 +186,7 @@ const BlockDetails = ({ navigation, route }) => {
                   <IconButton 
                     icon="cash-multiple" 
                     size={24} 
-                    iconColor="#10B981" 
+                    iconColor={Colors.success} 
                     style={{ backgroundColor: '#ECFDF5', margin: 0, marginRight: 8 }} 
                     onPress={() => navigation.navigate('BlockRevenue', { blockId: currentBlock?.id,             blockName: currentBlock?.name })} 
                   />
@@ -180,8 +194,8 @@ const BlockDetails = ({ navigation, route }) => {
                   <IconButton 
                     icon="cog-outline" 
                     size={24} 
-                    iconColor="#6200EE" 
-                    style={{ backgroundColor: '#F3E5F5', margin: 0 }} 
+                    iconColor={Colors.primary} 
+                    style={{ backgroundColor: Colors.primaryLight, margin: 0 }} 
                     onPress={() => navigation.navigate('AddBlockScreen', { isEditMode: true, blockId:             currentBlock?.id, blockName: currentBlock?.name })} 
                   />
               </View>
@@ -195,8 +209,18 @@ const BlockDetails = ({ navigation, route }) => {
                 loading={isGenerating}
                 disabled={isGenerating}
                 style={[styles.addBtn, {flex: 1}]}
+                buttonColor={Colors.primary}
               >
                 Add New Floor
+              </Button>
+              <Button
+                mode="outlined"
+                icon="silverware-fork-knife"
+                onPress={() => navigation.navigate('OwnerMessMenu', { blockId: blockName, blockName: blockName })}
+                style={[styles.addBtn, {flex: 1, marginLeft: 8}]}
+                textColor={Colors.primary}
+              >
+                Mess Menu
               </Button>
             </View>
             
@@ -206,7 +230,7 @@ const BlockDetails = ({ navigation, route }) => {
               <View style={styles.statItem}>
                 <Text variant="labelSmall" style={styles.statLabel}>Total Occupancy</Text>
                 {loadingStats ? (
-                  <ActivityIndicator size="small" color="#6200EE" style={{marginVertical: 4}}/>
+                  <ActivityIndicator size="small" color={Colors.primary} style={{marginVertical: 4}}/>
                 ) : (
                   <Text variant="titleLarge" style={styles.statValue}>
                     {totals.occupiedBeds}/{totals.totalBeds}
@@ -231,7 +255,7 @@ const BlockDetails = ({ navigation, route }) => {
                     if (!amenity) return null;
                     return (
                       <View key={index} style={styles.amenityItem}>
-                        <Avatar.Icon size={34} icon={amenity.icon} style={styles.amenityIcon} color="#6200EE" />
+                        <Avatar.Icon size={34} icon={amenity.icon} style={styles.amenityIcon} color={Colors.primary} />
                         <Text variant="labelSmall" style={{color: '#424242', marginTop: 4}}>{amenity.label}</Text>
                       </View>
                     );
@@ -251,13 +275,15 @@ const BlockDetails = ({ navigation, route }) => {
         </View>
 
         {loadingStats && !refreshing ? (
-          <View style={{ padding: 40, alignItems: 'center' }}>
-            <ActivityIndicator size="large" color="#6200EE" />
+          <View>
+            <SkeletonLoader width="100%" height={120} style={{ marginBottom: 16, borderRadius: 20 }} />
+            <SkeletonLoader width="100%" height={120} style={{ marginBottom: 16, borderRadius: 20 }} />
+            <SkeletonLoader width="100%" height={120} style={{ marginBottom: 16, borderRadius: 20 }} />
           </View>
         ) : floorStats.length > 0 ? (
           floorStats.map((floor) => {
             const occupancyRate = floor.totalBeds > 0 ? (floor.occupiedBeds / floor.totalBeds) : 0;
-            const statusColor = occupancyRate > 0.8 ? '#F44336' : '#6200EE';
+            const statusColor = occupancyRate > 0.8 ? Colors.danger : Colors.primary;
 
             return (
               <TouchableOpacity 
@@ -317,7 +343,7 @@ const BlockDetails = ({ navigation, route }) => {
               onChangeText={setRoomCountInput} 
               keyboardType="number-pad" 
               mode="outlined" 
-              activeOutlineColor="#6200EE" 
+              activeOutlineColor={Colors.primary} 
               textColor="#1A1A1A"
               style={{ marginBottom: 20, backgroundColor: '#FFF' }} 
             />
@@ -330,8 +356,8 @@ const BlockDetails = ({ navigation, route }) => {
             </View>
           </Dialog.Content>
           <Dialog.Actions>
-            <Button onPress={() => setModalVisible(false)} textColor="#757575">Cancel</Button>
-            <Button onPress={handleConfirmAddFloor} mode="contained" buttonColor="#6200EE">Generate</Button>
+            <Button onPress={() => setModalVisible(false)} textColor={Colors.textMedium}>Cancel</Button>
+            <Button onPress={handleConfirmAddFloor} mode="contained" buttonColor={Colors.primary}>Generate</Button>
           </Dialog.Actions>
         </Dialog>
 
@@ -354,7 +380,7 @@ const BlockDetails = ({ navigation, route }) => {
           </Dialog.Content>
           <Dialog.Actions style={{ paddingHorizontal: 20, paddingBottom: 20, justifyContent: 'space-between' }}>
             <Button onPress={() => setDeleteModalVisible(false)} textColor="#6B7280" style={{flex: 1}}>Cancel</Button>
-            <Button onPress={confirmDeleteFloor} mode="contained" buttonColor="#EF4444" loading={isDeleting} style={{flex: 1, marginLeft: 10}}>Delete</Button>
+            <Button onPress={confirmDeleteFloor} mode="contained" buttonColor={Colors.danger} loading={isDeleting} style={{flex: 1, marginLeft: 10}}>Delete</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
@@ -363,31 +389,31 @@ const BlockDetails = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F0F2F5' },
+  container: { flex: 1, backgroundColor: Colors.background },
   scroll: { padding: 16, paddingBottom: 40 },
-  infoCard: { backgroundColor: '#FFFFFF', borderRadius: 24, marginBottom: 24, elevation: 2 },
+  infoCard: { backgroundColor: Colors.cardBg, borderRadius: 24, marginBottom: 24, elevation: 2 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
   locationContainer: { flexDirection: 'row', alignItems: 'center', marginLeft: -8 },
-  locationText: { color: '#616161' },
-  addBtn: { borderRadius: 12, backgroundColor: '#6200EE' },
-  divider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 16 },
+  locationText: { color: Colors.textMedium },
+  addBtn: { borderRadius: 12 },
+  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 16 },
   statsRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
   statItem: { alignItems: 'center' },
-  statLabel: { color: '#757575', marginBottom: 4 },
-  statValue: { fontWeight: 'bold', color: '#1A1A1A' },
-  verticalDivider: { width: 1, height: 40, backgroundColor: '#EEE' },
+  statLabel: { color: Colors.textMedium, marginBottom: 4 },
+  statValue: { fontWeight: 'bold', color: Colors.textDark },
+  verticalDivider: { width: 1, height: 40, backgroundColor: Colors.border },
   amenityItem: { alignItems: 'center' },
-  amenityIcon: { backgroundColor: '#F3E5F5' },
-  boldText: { fontWeight: 'bold', color: '#1A1A1A' }, 
+  amenityIcon: { backgroundColor: Colors.primaryLight },
+  boldText: { fontWeight: 'bold', color: Colors.textDark },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 12 },
-  sectionTitle: { fontWeight: 'bold', color: '#1A1A1A' },
-  floorSurface: { backgroundColor: '#FFF', borderRadius: 20, padding: 16, marginBottom: 16 },
+  sectionTitle: { fontWeight: 'bold', color: Colors.textDark },
+  floorSurface: { backgroundColor: Colors.cardBg, borderRadius: 20, padding: 16, marginBottom: 16 },
   floorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   progressBar: { height: 6, borderRadius: 3, marginBottom: 16 },
   sharingGrid: { flexDirection: 'row', justifyContent: 'space-between' },
-  sharingBox: { backgroundColor: '#F8F9FB', padding: 10, borderRadius: 12, alignItems: 'center', width: '31%' },
-  shareLabel: { fontSize: 11, color: '#757575' },
-  shareValue: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  sharingBox: { backgroundColor: Colors.inputBg, padding: 10, borderRadius: 12, alignItems: 'center', width: '31%' },
+  shareLabel: { fontSize: 11, color: Colors.textMedium },
+  shareValue: { fontSize: 16, fontWeight: 'bold', color: Colors.textDark },
 });
 
 export default BlockDetails;

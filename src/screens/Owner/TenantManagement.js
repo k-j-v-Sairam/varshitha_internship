@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, StatusBar, ScrollView, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, FlatList, TouchableOpacity, StatusBar, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { Text, Surface, IconButton, Searchbar, FAB, Avatar, Badge, Chip, useTheme } from 'react-native-paper';
-import { useFocusEffect } from '@react-navigation/native';
-import { useHostel } from '../../context/HostelContext';
+import { useBlocks, useTenants } from '../../hooks/useQueries';
+import SkeletonLoader from '../../components/common/SkeletonLoader';
+import { Colors } from '../../theme/colors';
 
 const TenantManagement = ({ navigation }) => {
   const theme = useTheme();
@@ -12,33 +13,17 @@ const TenantManagement = ({ navigation }) => {
   const [statusFilter, setStatusFilter] = useState('All'); 
   const [blockFilter, setBlockFilter] = useState('All');   
   
-  const [tenants, setTenants] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  const { blocks, getAllTenants } = useHostel();
-
   // --- LIVE DATA FETCH ---
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-      const fetchTenants = async () => {
-        setLoading(true);
-        try {
-          const fetchedTenants = await getAllTenants();
-          if (isActive) {
-            setTenants(fetchedTenants);
-            setLoading(false);
-          }
-        } catch (error) {
-          console.error("Error fetching management data:", error);
-          if (isActive) setLoading(false);
-        }
-      };
-      
-      fetchTenants();
-      return () => { isActive = false; };
-    }, [])
-  );
+  const { data: blocks = [], refetch: refetchBlocks } = useBlocks();
+  const { data: tenants = [], isLoading: loading, refetch: refetchTenants } = useTenants();
+  
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refetchBlocks(), refetchTenants()]);
+    setRefreshing(false);
+  }, [refetchBlocks, refetchTenants]);
 
   // --- DYNAMIC BLOCK OPTIONS ---
   const blockOptions = ['All', ...blocks.map(b => b.name)];
@@ -48,7 +33,7 @@ const TenantManagement = ({ navigation }) => {
   // 1. Filter accurately by the blockId saved directly in the tenant's database file
   const tenantsInBlock = tenants.filter(t => {
     if (blockFilter === 'All') return true;
-    const tBlock = t.blockId || 'A'; // Fallback if old data is missing it
+    const tBlock = t.blockId || 'Unassigned'; // Fallback if old data is missing it
     return tBlock === blockFilter || tBlock === blockFilter.replace('Block ', '');
   });
 
@@ -60,7 +45,7 @@ const TenantManagement = ({ navigation }) => {
 
   // 3. Filter by Search Text & Status
   const finalDisplayList = tenantsInBlock.filter(tenant => {
-    const smartId = `${tenant.blockId || 'A'}-${tenant.roomNumber || 'None'}`;
+    const smartId = `${tenant.blockId || 'Unassigned'}-${tenant.roomNumber || 'None'}`;
     const searchLower = searchQuery.toLowerCase();
     
     const matchesSearch = 
@@ -114,13 +99,13 @@ const TenantManagement = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#4F46E5" />
+      <StatusBar barStyle="light-content" backgroundColor={Colors.primary} />
       
       {/* HEADER */}
       <View style={styles.header}>
         <IconButton icon="arrow-left" iconColor="#fff" size={24} onPress={() => navigation.goBack()} />
         <Text style={styles.headerTitle}>Tenant Management</Text>
-        <IconButton icon="bell-outline" iconColor="#fff" size={24} />
+        <IconButton icon="bell-outline" iconColor="#fff" size={24} onPress={() => navigation.navigate('OwnerComplaints')} />
       </View>
 
       <View style={styles.contentContainer}>
@@ -136,9 +121,9 @@ const TenantManagement = ({ navigation }) => {
                 onPress={() => setBlockFilter(block)}
                 style={[
                   styles.blockChip, 
-                  blockFilter === block && { backgroundColor: '#4F46E5' }
+                  blockFilter === block && { backgroundColor: Colors.primary }
                 ]}
-                textStyle={{ color: blockFilter === block ? '#fff' : '#4F46E5' }}
+                textStyle={{ color: blockFilter === block ? '#fff' : Colors.primary }}
               >
                 {block === 'All' ? 'All Blocks' : block}
               </Chip>
@@ -168,9 +153,11 @@ const TenantManagement = ({ navigation }) => {
         />
 
         {/* TENANT LIST */}
-        {loading ? (
-          <View style={styles.centerLoad}>
-             <ActivityIndicator size="large" color="#4F46E5" />
+        {loading && !refreshing ? (
+          <View>
+            {[...Array(4)].map((_, i) => (
+               <SkeletonLoader key={i} width="100%" height={80} style={{ marginBottom: 12, borderRadius: 16 }} />
+            ))}
           </View>
         ) : (
           <FlatList
@@ -178,6 +165,7 @@ const TenantManagement = ({ navigation }) => {
             keyExtractor={item => item.id}
             contentContainerStyle={{ paddingBottom: 80 }}
             showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />}
             ListEmptyComponent={
                <Text style={styles.emptyText}>No tenants found in {blockFilter}.</Text>
             }
@@ -200,13 +188,14 @@ const TenantManagement = ({ navigation }) => {
                       />
                     )}
                     <View style={styles.cardInfo}>
-                      <Text style={styles.tenantName}>{item.name}</Text>
+                      <Text style={styles.tenantName} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
                       
                       {/* ACCURATE ID DISPLAY */}
                       <View style={styles.idContainer}>
                          <Text style={styles.idLabel}>ID: </Text>
-                         <Text style={styles.idText}>{item.blockId || 'A'}-{item.roomNumber || 'None'}</Text>
+                         <Text style={styles.idText}>{item.blockId || 'Unassigned'}-{item.roomNumber || 'None'}</Text>
                       </View>
+
 
                     </View>
                   </View>
@@ -239,33 +228,33 @@ const TenantManagement = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F7FA' },
-  header: { backgroundColor: '#4F46E5', paddingTop: 40, paddingBottom: 20, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomLeftRadius: 24, borderBottomRightRadius: 24, elevation: 4 },
+  container: { flex: 1, backgroundColor: Colors.background },
+  header: { backgroundColor: Colors.primary, paddingTop: 40, paddingBottom: 20, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomLeftRadius: 24, borderBottomRightRadius: 24, elevation: 4 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
   contentContainer: { flex: 1, padding: 20 },
   blockFilterContainer: { marginBottom: 15, height: 40 },
-  blockChip: { marginRight: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#4F46E5' },
+  blockChip: { marginRight: 10, backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: Colors.primary },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   statCard: { flex: 0.48, borderRadius: 16 },
-  statInner: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 16, backgroundColor: '#fff', height: 70 },
+  statInner: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 16, backgroundColor: Colors.cardBg, height: 70 },
   statIconBox: { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  statCount: { fontSize: 18, fontWeight: 'bold', color: '#1F2937' },
-  statLabel: { fontSize: 12, color: '#6B7280' },
-  searchBar: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 20, height: 45 },
+  statCount: { fontSize: 18, fontWeight: 'bold', color: Colors.textDark },
+  statLabel: { fontSize: 12, color: Colors.textMedium },
+  searchBar: { backgroundColor: Colors.cardBg, borderRadius: 12, marginBottom: 20, height: 45 },
   searchInput: { fontSize: 14, alignSelf: 'center' },
-  tenantCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 16, marginBottom: 12 },
+  tenantCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, backgroundColor: Colors.cardBg, borderRadius: 16, marginBottom: 12 },
   cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  cardInfo: { marginLeft: 12, flex: 1 },
-  tenantName: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  cardInfo: { marginLeft: 12, flex: 1, marginRight: 10 },
+  tenantName: { fontSize: 16, fontWeight: '700', color: Colors.textDark },
   idContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  idLabel: { fontSize: 12, color: '#9CA3AF' },
-  idText: { fontSize: 13, fontWeight: 'bold', color: '#4B5563' },
-  cardRight: { alignItems: 'flex-end' },
-  amountText: { fontSize: 16, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
-  statusBadge: { fontWeight: 'bold', borderRadius: 6, paddingHorizontal: 8, fontSize: 11, height: 22, lineHeight: 22 },
-  emptyText: { textAlign: 'center', color: '#9CA3AF', marginTop: 20 },
+  idLabel: { fontSize: 12, color: Colors.textMuted },
+  idText: { fontSize: 13, fontWeight: 'bold', color: Colors.textMedium },
+  cardRight: { alignItems: 'flex-end', maxWidth: 110 },
+  amountText: { fontSize: 16, fontWeight: '700', color: Colors.textDark, marginBottom: 4 },
+  statusBadge: { fontWeight: 'bold', borderRadius: 6, paddingHorizontal: 8, fontSize: 11, height: 22, lineHeight: 22, maxWidth: 100 },
+  emptyText: { textAlign: 'center', color: Colors.textMuted, marginTop: 20 },
   centerLoad: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  fab: { position: 'absolute', margin: 16, right: 0, bottom: 0, backgroundColor: '#4F46E5', borderRadius: 28 },
+  fab: { position: 'absolute', margin: 16, right: 0, bottom: 0, backgroundColor: Colors.primary, borderRadius: 28 },
 });
 
 export default TenantManagement;

@@ -6,6 +6,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'; 
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // --- IMPORT OWNER SCREENS ---
 import LoginScreen from '../screens/Auth/LoginScreen';
@@ -32,6 +33,13 @@ import AssignTenantScreen from '../screens/Owner/AssignTenantScreen';
 import AddStaff from '../screens/Owner/AddStaff';
 import AddBlockScreen from '../screens/Owner/AddBlockScreen';
 import BlockRevenue from '../screens/Owner/BlockRevenue';
+import ExpenditureBreakdown from '../screens/Owner/ExpenditureBreakdown';
+import RevenueBreakdown from '../screens/Owner/RevenueBreakdown';
+import OwnerComplaintsScreen from '../screens/Owner/OwnerComplaintsScreen';
+import OwnerMessMenuScreen from '../screens/Owner/OwnerMessMenuScreen';
+import OwnerNoticeBoardScreen from '../screens/Owner/NoticeBoardScreen';
+import OwnerSupplyAlertsScreen from '../screens/Owner/OwnerSupplyAlertsScreen';
+import OwnerPendingPaymentsScreen from '../screens/Owner/OwnerPendingPaymentsScreen';
 
 // --- IMPORT STAFF & TENANT SCREENS ---
 import StaffDashboard from '../screens/Staff/StaffDashboard'; 
@@ -87,43 +95,66 @@ export default function AppNavigator() {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null); 
+  const [roleLoading, setRoleLoading] = useState(false);
 
   useEffect(() => {
     let roleSubscriber = null;
 
-    const authSubscriber = auth().onAuthStateChanged((currentUser) => {
-      setUser(currentUser);
-
+    const checkCacheAndAuth = async (currentUser) => {
       if (currentUser) {
-        // Use onSnapshot (Real-time listener) instead of get() to handle the registration delay
+        // Optimistically load role from cache for instant boot
+        try {
+          const cachedRole = await AsyncStorage.getItem(`user_role_${currentUser.uid}`);
+          if (cachedRole) {
+            setRole(cachedRole);
+            setRoleLoading(false);
+            if (initializing) setInitializing(false);
+          } else {
+            setRoleLoading(true);
+          }
+        } catch (e) {
+          setRoleLoading(true);
+        }
+
+        // Always subscribe to Firestore for real-time updates and cache refreshing
         roleSubscriber = firestore()
           .collection('users')
           .doc(currentUser.uid)
           .onSnapshot(
-            (documentSnapshot) => {
-              // SAFE CHECK: Grab the data first, and verify it exists before reading '.role'
+            async (documentSnapshot) => {
               const data = documentSnapshot?.data();
-              
               if (documentSnapshot?.exists && data && data.role) {
                 setRole(data.role);
+                try {
+                  await AsyncStorage.setItem(`user_role_${currentUser.uid}`, data.role);
+                } catch (e) {}
               } else {
-                // If the doc doesn't exist yet, or data is temporarily missing, stay null
                 setRole(null);
+                try {
+                  await AsyncStorage.removeItem(`user_role_${currentUser.uid}`);
+                } catch (e) {}
               }
               
+              setRoleLoading(false);
               if (initializing) setInitializing(false);
             },
             (error) => {
               console.error("Error fetching role for navigator:", error);
+              setRoleLoading(false);
               if (initializing) setInitializing(false);
             }
           );
       } else {
         // User is fully logged out
         setRole(null);
-        if (roleSubscriber) roleSubscriber(); // Clean up listener
+        if (roleSubscriber) roleSubscriber();
         if (initializing) setInitializing(false);
       }
+    };
+
+    const authSubscriber = auth().onAuthStateChanged((currentUser) => {
+      setUser(currentUser);
+      checkCacheAndAuth(currentUser);
     });
     
     return () => {
@@ -133,9 +164,9 @@ export default function AppNavigator() {
   }, []);
 
   // Loading Screen
-  if (initializing) {
+  if (initializing || roleLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F5F5' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F7FA' }}>
         <ActivityIndicator size="large" color="#5D5FEF" />
       </View>
     );
@@ -176,6 +207,13 @@ export default function AppNavigator() {
             <Stack.Screen name="AssignTenant" component={AssignTenantScreen} />
             <Stack.Screen name="AddBlockScreen" component={AddBlockScreen} />
             <Stack.Screen name="BlockRevenue" component={BlockRevenue} options={{ headerShown: false }} />
+            <Stack.Screen name="ExpenditureBreakdown" component={ExpenditureBreakdown} />
+            <Stack.Screen name="RevenueBreakdown" component={RevenueBreakdown} />
+            <Stack.Screen name="OwnerComplaints" component={OwnerComplaintsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OwnerMessMenu" component={OwnerMessMenuScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OwnerNoticeBoard" component={OwnerNoticeBoardScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OwnerSupplyAlerts" component={OwnerSupplyAlertsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OwnerPendingPayments" component={OwnerPendingPaymentsScreen} options={{ headerShown: false }} />
           </>
         ) : 
         

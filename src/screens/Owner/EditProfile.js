@@ -4,6 +4,7 @@ import { Text, TextInput, Button, Avatar, Surface } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import { Colors } from '../../theme/colors';
 
 const EditProfile = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
@@ -79,8 +80,8 @@ const EditProfile = ({ navigation }) => {
 
   if (loading) {
     return (
-      <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF'}}>
-        <ActivityIndicator size="large" color="#004B8D" />
+      <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background}}>
+        <ActivityIndicator size="large" color={Colors.primary} />
       </View>
     );
   }
@@ -103,7 +104,7 @@ const EditProfile = ({ navigation }) => {
           
           <View style={styles.avatarSection}>
             <View>
-              <Avatar.Text size={100} label={initials} style={{backgroundColor: '#E3F2FD'}} color="#004B8D" />
+              <Avatar.Text size={100} label={initials} style={{backgroundColor: Colors.primaryLight}} color={Colors.primary} />
               <TouchableOpacity style={styles.cameraIcon} onPress={handleChangePhoto}>
                 <Icon name="camera" size={20} color="#FFF" />
               </TouchableOpacity>
@@ -119,7 +120,7 @@ const EditProfile = ({ navigation }) => {
                 mode="outlined"
                 style={styles.input}
                 outlineColor="#E0E0E0"
-                activeOutlineColor="#004B8D"
+                activeOutlineColor={Colors.primary}
                 left={<TextInput.Icon icon="account-outline" color="#757575" />}
               />
 
@@ -141,7 +142,7 @@ const EditProfile = ({ navigation }) => {
                 mode="outlined"
                 style={styles.input}
                 outlineColor="#E0E0E0"
-                activeOutlineColor="#004B8D"
+                activeOutlineColor={Colors.primary}
                 keyboardType="phone-pad"
                 left={<TextInput.Icon icon="phone-outline" color="#757575" />}
               />
@@ -153,7 +154,7 @@ const EditProfile = ({ navigation }) => {
                 mode="outlined"
                 style={styles.input}
                 outlineColor="#E0E0E0"
-                activeOutlineColor="#004B8D"
+                activeOutlineColor={Colors.primary}
                 left={<TextInput.Icon icon="office-building-outline" color="#757575" />}
               />
           </Surface>
@@ -166,7 +167,7 @@ const EditProfile = ({ navigation }) => {
             style={styles.saveButton}
             contentStyle={{height: 50}}
             labelStyle={{fontSize: 16, fontWeight: 'bold'}}
-            buttonColor="#004B8D"
+            buttonColor={Colors.primary}
           >
             Save Changes
           </Button>
@@ -178,7 +179,7 @@ const EditProfile = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF' },
+  container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5',
+    borderBottomColor: Colors.border,
   },
   backButton: { padding: 5 },
   content: { padding: 20 },
@@ -195,15 +196,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0,
     right: 0,
-    backgroundColor: '#004B8D',
+    backgroundColor: Colors.primary,
     padding: 8,
     borderRadius: 20,
     borderWidth: 3,
-    borderColor: '#FFF',
+    borderColor: Colors.cardBg,
   },
   formContainer: { marginBottom: 20 },
-  input: { backgroundColor: '#FFF', marginBottom: 15 },
-  disabledInput: { backgroundColor: '#F9FAFB' },
+  input: { backgroundColor: Colors.cardBg, marginBottom: 15 },
+  disabledInput: { backgroundColor: Colors.inputBg },
   saveButton: { borderRadius: 12, marginTop: 10, elevation: 2 },
 });
 

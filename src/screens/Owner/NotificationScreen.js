@@ -5,23 +5,9 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const NotificationScreen = ({ navigation }) => {
   
-  // Mock Data - Grouped by timeline
-  const [notifications, setNotifications] = useState([
-    {
-      title: 'Today',
-      data: [
-        { id: '1', type: 'payment', title: 'Rent Received', body: 'Rahul (Room 101) paid ₹5,000 via UPI.', time: '2 min ago', read: false },
-        { id: '2', type: 'issue', title: 'Water Leakage', body: 'Reported in Block A, 2nd Floor washroom.', time: '1 hr ago', read: false },
-      ]
-    },
-    {
-      title: 'Yesterday',
-      data: [
-        { id: '3', type: 'staff', title: 'Staff Check-In', body: 'Ramesh (Cleaner) marked attendance.', time: '9:00 AM', read: true },
-        { id: '4', type: 'general', title: 'Wifi Bill Due', body: 'Reminder to pay the monthly internet bill.', time: '2:30 PM', read: true },
-      ]
-    },
-  ]);
+  // Notification Data
+  const [notifications, setNotifications] = useState([]);
+
 
   // Helper to get Icon based on type
   const getIcon = (type) => {
@@ -47,7 +33,7 @@ const NotificationScreen = ({ navigation }) => {
           {/* Content */}
           <View style={styles.contentBox}>
             <View style={styles.titleRow}>
-              <Text variant="titleSmall" style={styles.cardTitle}>{item.title}</Text>
+              <Text variant="titleSmall" style={styles.cardTitle} numberOfLines={1} ellipsizeMode="tail">{item.title}</Text>
               <Text variant="labelSmall" style={styles.timeText}>{item.time}</Text>
             </View>
             <Text variant="bodySmall" numberOfLines={2} style={styles.cardBody}>
@@ -154,7 +140,7 @@ const styles = StyleSheet.create({
   },
   contentBox: { flex: 1 },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  cardTitle: { fontWeight: 'bold', color: '#333' },
+  cardTitle: { fontWeight: 'bold', color: '#333', flexShrink: 1, paddingRight: 8 },
   timeText: { color: '#9E9E9E', fontSize: 11 },
   cardBody: { color: '#616161', fontSize: 13, lineHeight: 18 },
   dot: {

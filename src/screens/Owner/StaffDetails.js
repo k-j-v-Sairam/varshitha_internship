@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, ActivityIndicator, Alert, Modal, Image, Linking, StatusBar, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback } from 'react-native';
-import { Text, IconButton, Avatar, Divider, Button, Surface, Switch } from 'react-native-paper';
-import firestore from '@react-native-firebase/firestore'; 
+import FileViewer from 'react-native-file-viewer';
+import { Text, IconButton, Avatar, Divider, Button, Surface, Switch, TextInput } from 'react-native-paper';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 import storage from '@react-native-firebase/storage';
-import { pick, types } from '@react-native-documents/picker'; 
+import { pick, types, keepLocalCopy } from '@react-native-documents/picker';
+import { updateSalaryStatus } from '../../services/staffService';
 
 const colors = {
   primary: '#6200EE', primaryLight: '#F3E5F5', background: '#F8FAFC', cardBg: '#FFFFFF', 
@@ -21,6 +24,14 @@ const StaffDetails = ({ navigation, route }) => {
   const [isBlockModalVisible, setBlockModalVisible] = useState(false);
   const [availableBlocks, setAvailableBlocks] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [isEditModalVisible, setEditModalVisible] = useState(false);
+  const [editForm, setEditForm] = useState({
+    salary: '',
+    phone: '',
+    shift: '',
+    emergencyContact: '',
+    address: '',
+  });
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -39,7 +50,16 @@ const StaffDetails = ({ navigation, route }) => {
       .onSnapshot(
         documentSnapshot => {
           if (documentSnapshot.exists) {
-            setStaff({ id: documentSnapshot.id, ...documentSnapshot.data() });
+            const d = documentSnapshot.data();
+            setStaff({ id: documentSnapshot.id, ...d });
+            // Sync edit form with latest data
+            setEditForm({
+              salary: String(d.salary || ''),
+              phone: d.phone || '',
+              shift: d.shift || '',
+              emergencyContact: d.emergencyContact || '',
+              address: d.address || '',
+            });
           }
           setLoading(false);
         },
@@ -52,11 +72,15 @@ const StaffDetails = ({ navigation, route }) => {
     return () => subscriber(); 
   }, [initialStaff?.id]);
 
-  // --- FETCH BLOCKS ---
+  // --- FETCH BLOCKS (with ownerId filter to satisfy security rules) ---
   useEffect(() => {
     const fetchBlocks = async () => {
       try {
-        const snap = await firestore().collection('blocks').get();
+        const ownerId = auth().currentUser?.uid;
+        if (!ownerId) return;
+        const snap = await firestore().collection('blocks')
+          .where('ownerId', '==', ownerId)
+          .get();
         const fetched = snap.docs.map(doc => doc.data().name);
         setAvailableBlocks(['Unassigned', ...fetched]);
       } catch (e) {
@@ -69,30 +93,39 @@ const StaffDetails = ({ navigation, route }) => {
   // --- 2. KYC DOCUMENT UPLOAD (FIREBASE STORAGE) ---
   const handleUploadDocument = async () => {
     try {
-      const result = await pick({ type: [types.images] });
+      const result = await pick({ type: [types.pdf] });
       const res = Array.isArray(result) ? result[0] : result;
 
       Alert.alert(
-        "Confirm Upload",
-        `Upload ${res.name} as ID Proof?`,
+        'Confirm Upload',
+        `Are you sure you want to upload "${res.name}"?`,
         [
-          { text: "Cancel", style: "cancel" },
+          { text: 'Cancel', style: 'cancel' },
           {
-            text: "Upload",
+            text: 'Upload',
             onPress: async () => {
               setUpdating(true);
               try {
-                const storageRef = storage().ref(`staff_documents/${staff.id}/${res.name}`);
-                await storageRef.putFile(res.uri);
-                const downloadURL = await storageRef.getDownloadURL();
+                let uploadUri = res.uri;
+                const copyResult = await keepLocalCopy({
+                  files: [{ uri: res.uri, fileName: res.name }],
+                  destination: 'documentDirectory' // Store permanently on device
+                });
+                
+                if (copyResult && copyResult[0] && copyResult[0].status === 'success') {
+                  uploadUri = copyResult[0].localUri;
+                } else {
+                  throw new Error(copyResult[0]?.copyError || 'Failed to prepare local file for upload.');
+                }
                 
                 await firestore().collection('staff').doc(staff.id).update({
-                  idDocumentUrl: downloadURL,
-                  idDocumentPath: `staff_documents/${staff.id}/${res.name}`
+                  idDocumentUrl: uploadUri,
+                  idDocumentPath: `local_documents/${staff.id}/${res.name}`
                 });
-                Alert.alert("Success", "Document uploaded securely.");
+                Alert.alert("Success", "Document saved to local device.");
               } catch (err) {
-                Alert.alert("Upload Failed", "Issue saving to Cloud Storage.");
+                console.error('Save Error:', err);
+                Alert.alert("Save Failed", "Issue saving the document locally.");
               } finally {
                 setUpdating(false);
               }
@@ -113,7 +146,13 @@ const StaffDetails = ({ navigation, route }) => {
       { text: "Delete", style: "destructive", onPress: async () => {
           setUpdating(true);
           try {
-            if (staff.idDocumentPath) await storage().ref(staff.idDocumentPath).delete();
+            if (staff.idDocumentPath) {
+              try {
+                await storage().ref(staff.idDocumentPath).delete();
+              } catch (e) {
+                console.warn('Ignoring delete error:', e);
+              }
+            }
             await firestore().collection('staff').doc(staff.id).update({
               idDocumentUrl: firestore.FieldValue.delete(),
               idDocumentPath: firestore.FieldValue.delete()
@@ -125,6 +164,31 @@ const StaffDetails = ({ navigation, route }) => {
           }
       }}
     ]);
+  };
+
+  const handlePasswordReset = (email) => {
+    if (!email) {
+      Alert.alert('No Email', 'This staff member does not have an email address on file.');
+      return;
+    }
+    Alert.alert(
+      'Reset Password',
+      `Send a password reset email to ${email}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            try {
+              await auth().sendPasswordResetEmail(email);
+              Alert.alert('Success', `Password reset link sent to ${email}`);
+            } catch (err) {
+              Alert.alert('Error', err.message || 'Could not send reset email.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   // --- 3. BLOCK HISTORY TIMELINE LOGIC ---
@@ -208,6 +272,66 @@ const StaffDetails = ({ navigation, route }) => {
     await firestore().collection('staff').doc(staff.id).update({ isTaker: !staff.isTaker });
   };
 
+  const handleSalaryPayment = async (status) => {
+    Alert.alert(
+      "Confirm Action",
+      `Mark salary as ${status}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Yes", 
+          onPress: async () => {
+            setUpdating(true);
+            try {
+              const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+              await updateSalaryStatus({
+                staffDocId: staff.id,
+                staffName: staff.name,
+                ownerId: auth().currentUser.uid,
+                salary: Number(staff.salary || 0),
+                salaryMonth: currentMonth,
+                newStatus: status
+              });
+              Alert.alert("Success", `Salary marked as ${status}`);
+            } catch (error) {
+              console.error("Salary update error:", error);
+              Alert.alert("Error", "Could not update salary status.");
+            } finally {
+              setUpdating(false);
+            }
+          } 
+        }
+      ]
+    );
+  };
+
+  // --- 5. SAVE EDITABLE PROFILE FIELDS ---
+  const handleSaveEdits = async () => {
+    if (!staff?.id) return;
+    const salaryNum = Number(editForm.salary);
+    if (editForm.salary && isNaN(salaryNum)) {
+      Alert.alert('Invalid Input', 'Salary must be a valid number.');
+      return;
+    }
+    setUpdating(true);
+    try {
+      const updates = {};
+      if (editForm.salary !== '') updates.salary = salaryNum;
+      if (editForm.phone !== '') updates.phone = editForm.phone.trim();
+      if (editForm.shift !== '') updates.shift = editForm.shift.trim();
+      if (editForm.emergencyContact !== '') updates.emergencyContact = editForm.emergencyContact.trim();
+      if (editForm.address !== '') updates.address = editForm.address.trim();
+
+      await firestore().collection('staff').doc(staff.id).update(updates);
+      setEditModalVisible(false);
+      Alert.alert('Saved', 'Staff details updated successfully.');
+    } catch (err) {
+      Alert.alert('Error', 'Could not save changes.');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   if (loading || !staff) {
     return (
       <View style={styles.centerContainer}>
@@ -240,7 +364,14 @@ const StaffDetails = ({ navigation, route }) => {
           <View pointerEvents="none"><IconButton icon="arrow-left" size={24} iconColor={colors.textDark} style={{margin:0}} /></View>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Staff Profile</Text>
-        <View style={{ width: 40 }} /> 
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <TouchableOpacity style={[styles.backBtn, { backgroundColor: colors.primaryLight }]} onPress={() => setBlockModalVisible(true)}>
+            <View pointerEvents="none"><IconButton icon="swap-horizontal" size={20} iconColor={colors.primary} style={{margin:0}} /></View>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.backBtn, { backgroundColor: colors.primaryLight }]} onPress={() => setEditModalVisible(true)}>
+            <View pointerEvents="none"><IconButton icon="pencil" size={20} iconColor={colors.primary} style={{margin:0}} /></View>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -255,12 +386,70 @@ const StaffDetails = ({ navigation, route }) => {
              <Text style={styles.profileRole}>{Array.isArray(staff.roles) ? staff.roles.join(', ') : staff.role}</Text>
              <Text style={styles.dot}>•</Text>
              
-             <TouchableOpacity style={styles.reassignButton} onPress={() => setBlockModalVisible(true)}>
-                <Text style={styles.profileBlock}>
+             <View style={[styles.reassignButton, { paddingRight: 10 }]}>
+                <Text style={styles.profileBlock} numberOfLines={1} ellipsizeMode="tail">
                   {!staff.block || staff.block === 'Unassigned' ? 'Unassigned' : `Block ${staff.block}`}
                 </Text>
-                <IconButton icon="pencil" size={14} iconColor={colors.pink} style={{ margin: 0, width: 18, height: 18 }} />
-             </TouchableOpacity>
+             </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 16, marginTop: 16 }}>
+            <TouchableOpacity style={styles.quickActionBtn} onPress={() => { if (staff.phone) Linking.openURL(`tel:${staff.phone}`); else Alert.alert('No Phone', 'No phone number available.'); }}>
+              <View pointerEvents="none"><IconButton icon="phone" size={22} iconColor={colors.primary} style={{ margin: 4 }} /></View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.quickActionBtn} onPress={() => { if (staff.phone) Linking.openURL(`sms:${staff.phone}`); else Alert.alert('No Phone', 'No phone number available.'); }}>
+              <View pointerEvents="none"><IconButton icon="message-text" size={22} iconColor={colors.success} style={{ margin: 4 }} /></View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.quickActionBtn} onPress={() => { if (staff.email) Linking.openURL(`mailto:${staff.email}`); else Alert.alert('No Email', 'No email available.'); }}>
+              <View pointerEvents="none"><IconButton icon="email" size={22} iconColor={colors.warning} style={{ margin: 4 }} /></View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.quickActionBtn} onPress={() => handlePasswordReset(staff.email)}>
+              <View pointerEvents="none"><IconButton icon="key-variant" size={22} iconColor={colors.error} style={{ margin: 4 }} /></View>
+            </TouchableOpacity>
+          </View>
+        </Surface>
+
+        {/* --- SALARY PAYMENT SYSTEM --- */}
+        <Text style={styles.sectionHeader}>Salary & Payment</Text>
+        <Surface style={styles.infoCard} elevation={1}>
+          <View style={[styles.documentHeader, { marginBottom: 15 }]}>
+            <Text style={styles.infoLabel}>Monthly Salary</Text>
+            <Text style={[styles.infoValue, { fontSize: 16, color: colors.primary, fontWeight: 'bold' }]}>
+              ₹{staff.salary || '0'}
+            </Text>
+          </View>
+          <View style={styles.documentHeader}>
+            <Text style={styles.infoLabel}>Payment Status</Text>
+            <Text style={[styles.infoValue, { fontSize: 13, color: statusColor, fontWeight: 'bold' }]}>
+              {staff.status === 'Paid' ? 'Cleared' : 'Pending / Due'}
+            </Text>
+          </View>
+          
+          <Divider style={{ marginVertical: 12 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+             <Text style={{fontWeight: '600', color: colors.textDark, fontSize: 13}}>Mark Action:</Text>
+             <View style={{flexDirection: 'row', gap: 10}}>
+                <Button 
+                  mode={staff.status === 'Paid' ? "contained" : "outlined"} 
+                  compact 
+                  buttonColor={staff.status === 'Paid' ? colors.success : undefined} 
+                  textColor={staff.status === 'Paid' ? '#FFF' : colors.success} 
+                  onPress={() => handleSalaryPayment('Cleared')} 
+                  disabled={updating}
+                >
+                  Paid
+                </Button>
+                <Button 
+                  mode={staff.status !== 'Paid' ? "contained" : "outlined"} 
+                  compact 
+                  buttonColor={staff.status !== 'Paid' ? colors.error : undefined} 
+                  textColor={staff.status !== 'Paid' ? '#FFF' : colors.error} 
+                  onPress={() => handleSalaryPayment('Pending')} 
+                  disabled={updating}
+                >
+                  Pending
+                </Button>
+             </View>
           </View>
         </Surface>
 
@@ -313,18 +502,31 @@ const StaffDetails = ({ navigation, route }) => {
           </View>
 
           {staff.idDocumentUrl ? (
-            <View style={styles.docActionsRow}>
-              <TouchableOpacity style={styles.viewBtn} onPress={() => setModalVisible(true)}>
-                <Text style={styles.viewBtnText}>View Document</Text>
-              </TouchableOpacity>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity style={styles.iconActionBtn} onPress={handleUploadDocument} disabled={updating}>
-                  <View pointerEvents="none"><IconButton icon="upload" size={22} iconColor={colors.primary} style={{margin:0}} /></View>
+            <View>
+              <View style={styles.docActionsRow}>
+                <TouchableOpacity style={styles.viewBtn} onPress={async () => {
+                  try {
+                    const cleanPath = staff.idDocumentUrl.replace(/^file:\/\//, '');
+                    await FileViewer.open(cleanPath, { showOpenWithDialog: true });
+                  } catch (e) {
+                  Alert.alert('Cannot Open', `Error: ${e.message || e}\nPath: ${staff.idDocumentUrl}`);
+                  console.log(e);
+                }  
+                }}>
+                  <Text style={styles.viewBtnText}>View Document</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.iconActionBtn} onPress={handleDeleteDocument} disabled={updating}>
-                  <View pointerEvents="none"><IconButton icon="trash-can" size={22} iconColor={colors.error} style={{margin:0}} /></View>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity style={styles.iconActionBtn} onPress={handleUploadDocument} disabled={updating}>
+                    <View pointerEvents="none"><IconButton icon="upload" size={22} iconColor={colors.primary} style={{margin:0}} /></View>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.iconActionBtn} onPress={handleDeleteDocument} disabled={updating}>
+                    <View pointerEvents="none"><IconButton icon="trash-can" size={22} iconColor={colors.error} style={{margin:0}} /></View>
+                  </TouchableOpacity>
+                </View>
               </View>
+              <Text style={{ fontSize: 11, color: colors.textLight, marginTop: 8, fontStyle: 'italic', textAlign: 'center' }}>
+                Note: This document is stored securely on this device's local storage to save cloud costs. It can only be viewed from this specific device. Other details remain synced everywhere.
+              </Text>
             </View>
           ) : (
             <TouchableOpacity style={styles.uploadBtn} onPress={handleUploadDocument} disabled={updating}>
@@ -375,13 +577,38 @@ const StaffDetails = ({ navigation, route }) => {
           )}
         </Surface>
 
-        {/* --- PERMISSIONS & JOB --- */}
-        <Text style={styles.sectionHeader}>Job & Permissions</Text>
+        {/* --- NON-EDITABLE INFO (Locked Fields) --- */}
+        <Text style={styles.sectionHeader}>Personal Details</Text>
+        <Surface style={styles.infoCard} elevation={1}>
+          <View style={styles.infoRow}>
+            <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Full Name (Locked)</Text><Text style={styles.infoValue}>{staff.name}</Text></View>
+            <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Staff ID (Locked)</Text><Text style={styles.infoValue}>{staff.staffId || 'ST-000'}</Text></View>
+          </View>
+          <Divider style={{ marginVertical: 12 }} />
+          <View style={styles.infoRow}>
+            <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Aadhaar / ID No. (Locked)</Text><Text style={styles.infoValue}>{staff.idNumber || 'Not Provided'}</Text></View>
+            <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Joined Date (Locked)</Text><Text style={styles.infoValue}>{staff.joinedDate || 'Unknown'}</Text></View>
+          </View>
+        </Surface>
+
+        {/* --- EDITABLE INFO --- */}
+        <Text style={styles.sectionHeader}>Job & Contact</Text>
         <Surface style={styles.infoCard} elevation={1}>
            <View style={styles.infoRow}>
-             <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Monthly Salary</Text><Text style={styles.infoValue}>₹{staff.salary}</Text></View>
-             <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Shift</Text><Text style={styles.infoValue}>{staff.shift} Shift</Text></View>
+             <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Monthly Salary</Text><Text style={styles.infoValue}>₹{staff.salary || '—'}</Text></View>
+             <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Shift</Text><Text style={styles.infoValue}>{staff.shift || '—'} Shift</Text></View>
            </View>
+           <Divider style={{ marginVertical: 12 }} />
+           <View style={styles.infoRow}>
+             <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Phone</Text><Text style={styles.infoValue}>{staff.phone || 'Not set'}</Text></View>
+             <View style={{ flex: 1 }}><Text style={styles.infoLabel}>Emergency Contact</Text><Text style={styles.infoValue}>{staff.emergencyContact || 'Not set'}</Text></View>
+           </View>
+           {staff.address ? (
+             <>
+               <Divider style={{ marginVertical: 12 }} />
+               <View><Text style={styles.infoLabel}>Address</Text><Text style={styles.infoValue}>{staff.address}</Text></View>
+             </>
+           ) : null}
            <Divider style={{ marginVertical: 12 }} />
            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
              <View style={{flex: 1}}>
@@ -393,6 +620,95 @@ const StaffDetails = ({ navigation, route }) => {
         </Surface>
 
       </ScrollView>
+
+      {/* --- EDIT PROFILE MODAL --- */}
+      <Modal visible={isEditModalVisible} transparent={true} animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.6)', justifyContent: 'flex-end' }}>
+              <View style={[styles.docModalContent, { paddingBottom: 30 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={styles.modalTitle}>Edit Staff Details</Text>
+                  <IconButton icon="close" size={22} iconColor={colors.textDark} onPress={() => setEditModalVisible(false)} />
+                </View>
+                <Text style={{ color: colors.textLight, fontSize: 12, marginBottom: 16 }}>Fields like name, Aadhaar and Staff ID cannot be changed.</Text>
+
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                  <Text style={styles.editSectionLabel}>SALARY & SHIFT</Text>
+                  <TextInput
+                    label="Monthly Salary (₹)"
+                    value={editForm.salary}
+                    onChangeText={(v) => setEditForm(f => ({ ...f, salary: v }))}
+                    keyboardType="numeric"
+                    mode="outlined"
+                    style={styles.editInput}
+                    outlineColor={colors.border}
+                    activeOutlineColor={colors.primary}
+                    textColor={colors.textDark}
+                  />
+                  <TextInput
+                    label="Shift (e.g. Morning, Night)"
+                    value={editForm.shift}
+                    onChangeText={(v) => setEditForm(f => ({ ...f, shift: v }))}
+                    mode="outlined"
+                    style={styles.editInput}
+                    outlineColor={colors.border}
+                    activeOutlineColor={colors.primary}
+                    textColor={colors.textDark}
+                  />
+                  <Text style={[styles.editSectionLabel, { marginTop: 8 }]}>CONTACT INFO</Text>
+                  <TextInput
+                    label="Phone Number"
+                    value={editForm.phone}
+                    onChangeText={(v) => setEditForm(f => ({ ...f, phone: v }))}
+                    keyboardType="phone-pad"
+                    mode="outlined"
+                    style={styles.editInput}
+                    outlineColor={colors.border}
+                    activeOutlineColor={colors.primary}
+                    textColor={colors.textDark}
+                  />
+                  <TextInput
+                    label="Emergency Contact"
+                    value={editForm.emergencyContact}
+                    onChangeText={(v) => setEditForm(f => ({ ...f, emergencyContact: v }))}
+                    keyboardType="phone-pad"
+                    mode="outlined"
+                    style={styles.editInput}
+                    outlineColor={colors.border}
+                    activeOutlineColor={colors.primary}
+                    textColor={colors.textDark}
+                  />
+                  <TextInput
+                    label="Address"
+                    value={editForm.address}
+                    onChangeText={(v) => setEditForm(f => ({ ...f, address: v }))}
+                    multiline
+                    numberOfLines={3}
+                    mode="outlined"
+                    style={styles.editInput}
+                    outlineColor={colors.border}
+                    activeOutlineColor={colors.primary}
+                    textColor={colors.textDark}
+                  />
+
+                  <Button
+                    mode="contained"
+                    onPress={handleSaveEdits}
+                    loading={updating}
+                    disabled={updating}
+                    buttonColor={colors.primary}
+                    style={{ borderRadius: 12, marginTop: 16 }}
+                    contentStyle={{ paddingVertical: 6 }}
+                  >
+                    Save Changes
+                  </Button>
+                </ScrollView>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* --- REASSIGN BLOCK MODAL --- */}
       <Modal visible={isBlockModalVisible} transparent={true} animationType="fade" onRequestClose={() => setBlockModalVisible(false)}>
@@ -446,11 +762,12 @@ const styles = StyleSheet.create({
   profileCard: { backgroundColor: colors.cardBg, borderRadius: 20, padding: 20, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: colors.border },
   profileName: { fontSize: 22, fontWeight: 'bold', color: colors.textDark },
   profileId: { fontSize: 13, color: colors.textLight, marginTop: 4 },
-  tagRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  tagRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, flexWrap: 'wrap', justifyContent: 'center' },
   dot: { marginHorizontal: 8, color: colors.textLight },
   profileRole: { fontSize: 14, fontWeight: '600', color: colors.textDark },
-  profileBlock: { fontSize: 14, fontWeight: 'bold', color: colors.pink },
-  reassignButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#CF667915', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  profileBlock: { fontSize: 14, fontWeight: 'bold', color: colors.pink, flexShrink: 1 },
+  reassignButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#CF667915', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexShrink: 1, maxWidth: '70%' },
+  quickActionBtn: { backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 1, borderColor: colors.border },
 
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, marginLeft: 4, marginTop: 5 },
   sectionHeader: { fontSize: 14, fontWeight: '700', color: colors.textLight, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10, marginLeft: 4, marginTop: 15 },
@@ -495,7 +812,9 @@ const styles = StyleSheet.create({
   modalOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   optionText: { fontSize: 15, color: colors.textDark, fontWeight: '500' },
   activeOption: { color: colors.pink, fontWeight: 'bold' },
-  documentImage: { width: '100%', height: 400, borderRadius: 12, backgroundColor: '#F1F5F9' }
+  documentImage: { width: '100%', height: 400, borderRadius: 12, backgroundColor: '#F1F5F9' },
+  editInput: { backgroundColor: '#FFF', marginBottom: 12 },
+  editSectionLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10, marginTop: 4 },
 });
 
 export default StaffDetails;

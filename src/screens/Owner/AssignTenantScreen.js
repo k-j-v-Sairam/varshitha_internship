@@ -2,38 +2,26 @@ import React, { useState, useCallback } from 'react';
 import { View, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { Text, Surface, IconButton, Avatar, Searchbar, Button } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
-import { useHostel } from '../../context/HostelContext';
+import { useTenants, useReassignTenant } from '../../hooks/useQueries';
+import SkeletonLoader from '../../components/common/SkeletonLoader';
 
-const colors = {
-  primary: '#4F46E5', background: '#F5F7FA', cardBg: '#FFFFFF', textDark: '#1F2937', 
-  textLight: '#6B7280', textWhite: '#FFFFFF', success: '#10B981', warning: '#FBBF24'
-};
+import { Colors } from '../../theme/colors';
 
 const AssignTenantScreen = ({ navigation, route }) => {
   const { roomId, blockId } = route.params || {};
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [allTenants, setAllTenants] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { data: allTenants = [], isLoading: loading, refetch } = useTenants();
+  const reassignTenantMutation = useReassignTenant();
+  
   const [isAssigning, setIsAssigning] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const { getAllTenants, reassignTenant } = useHostel();
-
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-      const fetchTenants = async () => {
-        setLoading(true);
-        const fetched = await getAllTenants();
-        if (isActive) {
-          setAllTenants(fetched);
-          setLoading(false);
-        }
-      };
-      fetchTenants();
-      return () => { isActive = false; };
-    }, [])
-  );
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  }, [refetch]);
 
   const handleAssign = (tenant) => {
     // Prevent assigning if they are already in this exact room and block
@@ -44,7 +32,7 @@ const AssignTenantScreen = ({ navigation, route }) => {
 
     Alert.alert(
       "Confirm Swap",
-      `Move ${tenant.name} from ${tenant.roomNumber ? `${tenant.blockId || 'A'}-${tenant.roomNumber}` : 'Unassigned'} to ${blockId}-${roomId}?`,
+      `Move ${tenant.name} from ${tenant.roomNumber ? `${tenant.blockId || 'Unassigned'}-${tenant.roomNumber}` : 'Unassigned'} to ${blockId}-${roomId}?`,
       [
         { text: "Cancel", style: "cancel" },
         { 
@@ -53,7 +41,7 @@ const AssignTenantScreen = ({ navigation, route }) => {
             setIsAssigning(true);
             try {
               // FIX: We are now passing the Target blockId to context!
-              await reassignTenant(tenant.id, tenant.roomNumber, roomId, blockId);
+              await reassignTenantMutation.mutateAsync({ tenantId: tenant.id, oldRoomNumber: tenant.roomNumber, newRoomNumber: roomId, newBlockId: blockId, oldBlockId: tenant.blockId });
               Alert.alert("Success", "Tenant reassigned successfully!", [
                 { text: "OK", onPress: () => navigation.goBack() }
               ]);
@@ -81,7 +69,7 @@ const AssignTenantScreen = ({ navigation, route }) => {
         {item.image ? (
           <Avatar.Image size={50} source={{ uri: item.image }} />
         ) : (
-          <Avatar.Icon size={50} icon="account" style={{backgroundColor: '#E0E7FF'}} color={colors.primary} />
+          <Avatar.Icon size={50} icon="account" style={{backgroundColor: '#E0E7FF'}} color={Colors.primary} />
         )}
         <View style={styles.tenantInfo}>
           <Text variant="titleMedium" style={styles.tenantName}>{item.name}</Text>
@@ -95,13 +83,13 @@ const AssignTenantScreen = ({ navigation, route }) => {
           
           {/* FIX: Clearly display the block and room number */}
           <Text variant="bodySmall" style={styles.tenantRoom}>
-            {item.roomNumber ? `Current Room: ${item.blockId || 'A'}-${item.roomNumber}` : 'Status: Unassigned'}
+            {item.roomNumber ? `Current Room: ${item.blockId || 'Unassigned'}-${item.roomNumber}` : 'Status: Unassigned'}
           </Text>
         </View>
         <Button 
           mode="contained" 
           onPress={() => handleAssign(item)}
-          buttonColor={colors.primary}
+          buttonColor={Colors.primary}
           style={{borderRadius: 8}}
         >
           Assign
@@ -114,7 +102,7 @@ const AssignTenantScreen = ({ navigation, route }) => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-          <IconButton icon="arrow-left" size={24} iconColor={colors.textDark} />
+          <IconButton icon="arrow-left" size={24} iconColor={Colors.textDark} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center', marginRight: 40 }}>
             {/* FIX: Update header to show target block */}
@@ -128,7 +116,7 @@ const AssignTenantScreen = ({ navigation, route }) => {
           onChangeText={setSearchQuery}
           value={searchQuery}
           style={styles.searchBar}
-          inputStyle={{color: colors.textDark}}
+          inputStyle={{color: Colors.textDark}}
         />
         
         <Button 
@@ -136,16 +124,17 @@ const AssignTenantScreen = ({ navigation, route }) => {
           icon="account-plus" 
           onPress={() => navigation.navigate('TenantOnboarding', { roomId, blockId })}
           style={styles.newTenantBtn}
-          textColor={colors.primary}
+          textColor={Colors.primary}
         >
           Create New Admission
         </Button>
       </View>
 
-      {loading || isAssigning ? (
-        <View style={styles.centerLoad}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          {isAssigning && <Text style={{marginTop: 10, color: colors.textLight}}>Moving Tenant...</Text>}
+      {loading && !refreshing ? (
+        <View style={{ paddingHorizontal: 16 }}>
+          {[...Array(4)].map((_, i) => (
+             <SkeletonLoader key={i} width="100%" height={90} style={{ marginBottom: 12, borderRadius: 16 }} />
+          ))}
         </View>
       ) : (
         <FlatList
@@ -154,9 +143,11 @@ const AssignTenantScreen = ({ navigation, route }) => {
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
+          onRefresh={onRefresh}
+          refreshing={refreshing}
           ListEmptyComponent={
             <View style={styles.emptyView}>
-              <Text style={{color: colors.textLight}}>No tenants found.</Text>
+              <Text style={{color: Colors.textLight}}>No tenants found.</Text>
             </View>
           }
         />
@@ -166,20 +157,20 @@ const AssignTenantScreen = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
-  backBtn: { backgroundColor: colors.cardBg, borderRadius: 12, elevation: 1 },
-  headerTitle: { fontWeight: '700', color: colors.textDark },
+  backBtn: { backgroundColor: Colors.cardBg, borderRadius: 12, elevation: 1 },
+  headerTitle: { fontWeight: '700', color: Colors.textDark },
   searchContainer: { paddingHorizontal: 16, paddingBottom: 10 },
-  searchBar: { backgroundColor: colors.cardBg, borderRadius: 12, elevation: 2, marginBottom: 16 },
+  searchBar: { backgroundColor: Colors.cardBg, borderRadius: 12, elevation: 2, marginBottom: 16 },
   newTenantBtn: { backgroundColor: '#EDE9FE', borderRadius: 12, paddingVertical: 4 },
   list: { padding: 16, paddingBottom: 40 },
-  tenantCard: { backgroundColor: colors.cardBg, borderRadius: 16, padding: 16, marginBottom: 12 },
+  tenantCard: { backgroundColor: Colors.cardBg, borderRadius: 16, padding: 16, marginBottom: 12 },
   tenantHeader: { flexDirection: 'row', alignItems: 'center' },
   tenantInfo: { flex: 1, marginLeft: 16 },
-  tenantName: { fontWeight: '700', color: colors.textDark, marginBottom: 2 },
+  tenantName: { fontWeight: '700', color: Colors.textDark, marginBottom: 2 },
   tenantDetails: { color: '#4B5563', fontSize: 12, marginBottom: 2 }, 
-  tenantRoom: { color: colors.primary, fontSize: 12, fontWeight: '600', marginTop: 4 },
+  tenantRoom: { color: Colors.primary, fontSize: 12, fontWeight: '600', marginTop: 4 },
   centerLoad: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyView: { alignItems: 'center', marginTop: 40 }
 });

@@ -1,42 +1,63 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Modal, InteractionManager, RefreshControl, ActivityIndicator, Alert } from 'react-native';
 import { 
   Text, 
-  Card, 
   Avatar, 
   IconButton, 
   Surface,
   Divider,
-  Button
+  Button,
+  Card
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg, { Circle, G } from 'react-native-svg';
+import Animated, { useSharedValue, useAnimatedProps, withTiming } from 'react-native-reanimated';
 import { useFocusEffect } from '@react-navigation/native'; 
 import auth from '@react-native-firebase/auth'; // 🔥 AUTH IMPORT
 
-import { useHostel } from '../../context/HostelContext';
+import { useBlocks, useDashboardStats, useNotices } from '../../hooks/useQueries';
+import SkeletonLoader from '../../components/common/SkeletonLoader';
+import AnimatedCard from '../../components/common/AnimatedCard';
+import { Colors } from '../../theme/colors';
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const OwnerDashboard = ({ navigation, route }) => {
   const [profileVisible, setProfileVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Hook Live Data (🔥 SECURE: Pulled from our locked-down Context)
-  const { stats, blocks, refreshDashboard, loading } = useHostel();
+  // React Query Hooks
+  const { data: blocks, refetch: refetchBlocks, isLoading: loadingBlocks } = useBlocks();
+  const { data: stats, refetch: refetchStats, isLoading: loadingStats } = useDashboardStats();
+  const { data: notices, refetch: refetchNotices, isLoading: loadingNotices } = useNotices();
 
-  // 🔥 NEW: Get real current user data
+  const loading = loadingBlocks || loadingStats;
+
+  // FIX 17: Dynamic time-based greeting
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning,';
+    if (hour < 17) return 'Good Afternoon,';
+    return 'Good Evening,';
+  };
+
+  // Current user display info
   const currentUser = auth().currentUser;
   const userEmail = currentUser?.email || 'Unknown User';
-  // Extract the name from the email (e.g. "admin" from "admin@test.com")
   const userName = currentUser?.displayName || userEmail.split('@')[0];
-  // Create 2-letter initials
   const userInitials = userName.substring(0, 2).toUpperCase();
+
+  // FIX 18: Issues count — wired to real data (unpaid tenants + high-priority notices)
+  const issuesCount = (stats?.unpaidTenants || 0) + (notices?.filter(n => n.priority === 'High' || n.priority === 'Urgent').length || 0);
+
+
 
   // Handle Swipe-To-Refresh
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refreshDashboard(); 
+    await Promise.all([refetchBlocks(), refetchStats(), refetchNotices()]);
     setRefreshing(false);
-  }, [refreshDashboard]);
+  }, [refetchBlocks, refetchStats, refetchNotices]);
 
   // Prevent white screen on profile open
   useFocusEffect(
@@ -62,14 +83,21 @@ const OwnerDashboard = ({ navigation, route }) => {
   const radius = 65;
   const strokeWidth = 12;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (percentage / 100) * circumference;
   
-  // --- COLOR THEME ---
-  const cardBackground = "#E3F2FD"; 
-  const mainBrandColor = "#004B8D"; 
-  const trackColor = "#E1E1E1";    
-  const textColorDark = "#333333";  
-  const textColorGrey = "#757575"; 
+  // SVG Animation
+  const animatedProgress = useSharedValue(0);
+  useEffect(() => {
+    animatedProgress.value = withTiming(percentage, {
+      duration: 1500,
+    });
+  }, [percentage]);
+
+  const animatedCircleProps = useAnimatedProps(() => {
+    const strokeDashoffset = circumference - (animatedProgress.value / 100) * circumference;
+    return {
+      strokeDashoffset,
+    };
+  }); 
 
   // --- Dynamic Block Stats ---
   const blockColors = ['#4CAF50', '#FF9800', '#F44336'];
@@ -85,10 +113,9 @@ const OwnerDashboard = ({ navigation, route }) => {
 
   const menuItems = [
     { icon: 'account-edit-outline', label: 'My Details', nav: 'EditProfile' },
-    { icon: 'credit-card-outline', label: 'Subscription & Payments', nav: 'Subscription' },
     { icon: 'bell-outline', label: 'Notifications', nav: 'Notifications' },
-    { icon: 'shield-check-outline', label: 'Privacy & Security', nav: 'Privacy' }, // Ensure this screen exists or change nav
-    { icon: 'help-circle-outline', label: 'Help & Support', nav: 'Help' }, // Ensure this screen exists or change nav
+    { icon: 'shield-check-outline', label: 'Privacy & Security', action: 'privacy' },
+    { icon: 'help-circle-outline', label: 'Help & Support', action: 'support' },
   ];
 
   return (
@@ -103,7 +130,7 @@ const OwnerDashboard = ({ navigation, route }) => {
         >
           <Avatar.Text size={40} label={userInitials} style={styles.avatar} labelStyle={{lineHeight:22}} />
           <View>
-            <Text variant="bodySmall" style={styles.welcomeText}>Good Morning,</Text>
+            <Text variant="bodySmall" style={styles.welcomeText}>{getGreeting()}</Text>
             <Text variant="titleMedium" style={styles.ownerName}>{userName}</Text>
           </View>
         </TouchableOpacity>
@@ -120,53 +147,57 @@ const OwnerDashboard = ({ navigation, route }) => {
         contentContainerStyle={styles.scrollContent} 
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[mainBrandColor]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />
         }
       >
         
         {/* Hero Card */}
         <TouchableOpacity onPress={() => navigation.navigate('Hostels')} activeOpacity={0.95}>
-          <Surface style={[styles.heroCard, { backgroundColor: cardBackground }]} elevation={4}>
+          <Surface style={[styles.heroCard, { backgroundColor: Colors.surface }]} elevation={4}>
             
             <View style={styles.heroContentRow}>
               <View style={styles.chartContainer}>
                 {loading && !refreshing ? (
-                  <ActivityIndicator size="large" color={mainBrandColor} style={{position: 'absolute'}} />
+                  <ActivityIndicator size="large" color={Colors.primary} style={{position: 'absolute'}} />
                 ) : (
                   <>
                     <Svg height="150" width="150" viewBox="0 0 150 150">
                       <G rotation="-90" origin="75, 75">
                         <Circle
                           cx="75" cy="75" r={radius}
-                          stroke={trackColor} strokeWidth={strokeWidth}
+                          stroke={Colors.border} strokeWidth={strokeWidth}
                           fill="transparent"
                         />
-                        <Circle
+                        <AnimatedCircle
                           cx="75" cy="75" r={radius}
-                          stroke={mainBrandColor} strokeWidth={strokeWidth}
+                          stroke={Colors.primary} strokeWidth={strokeWidth}
                           fill="transparent"
                           strokeDasharray={circumference}
-                          strokeDashoffset={strokeDashoffset}
+                          animatedProps={animatedCircleProps}
                           strokeLinecap="round"
                         />
                       </G>
                     </Svg>
                     <View style={styles.chartTextAbsolute}>
-                      <Text variant="headlineMedium" style={{color: mainBrandColor, fontWeight:'bold'}}>{percentage}%</Text>
-                      <Text variant="labelSmall" style={{color: textColorGrey}}>Occupied</Text>
+                      <Text variant="headlineMedium" style={{color: Colors.primary, fontWeight:'bold'}}>{percentage}%</Text>
+                      <Text variant="labelSmall" style={{color: Colors.textMedium}}>Occupied</Text>
                     </View>
                   </>
                 )}
               </View>
 
               <View style={styles.heroInfo}>
-                <Text variant="titleMedium" style={{color: mainBrandColor, fontWeight:'bold', marginBottom:4}}>
+                <Text variant="titleMedium" style={{color: Colors.primary, fontWeight:'bold', marginBottom:4}}>
                   Hostel Status
                 </Text>
-                <Text variant="bodySmall" style={{color: textColorDark, lineHeight: 18}}>
-                  You have <Text style={{fontWeight:'bold', color: mainBrandColor}}>{100 - percentage}% vacancy</Text> this month. Fill {stats?.vacantRooms || 0} beds to reach 100%.
-                </Text>
-                <View style={[styles.actionPill, { backgroundColor: mainBrandColor }]}>
+                {loading && !refreshing ? (
+                  <SkeletonLoader width={120} height={40} />
+                ) : (
+                  <Text variant="bodySmall" style={{color: Colors.textDark, lineHeight: 18}}>
+                    You have <Text style={{fontWeight:'bold', color: Colors.primary}}>{100 - percentage}% vacancy</Text> this month. Fill {stats?.vacantRooms || 0} beds to reach 100%.
+                  </Text>
+                )}
+                <View style={[styles.actionPill, { backgroundColor: Colors.primary }]}>
                     <Text style={styles.actionText}>View Details →</Text>
                 </View>
               </View>
@@ -190,27 +221,53 @@ const OwnerDashboard = ({ navigation, route }) => {
         {/* Quick Stats */}
         <Text variant="titleMedium" style={styles.sectionHeader}>Quick Stats</Text>
         <View style={styles.statsRow}>
-          <Card style={[styles.statCard, {backgroundColor: '#e3f2fd'}]} onPress={() => navigation.navigate('Hostels')}>
+          <AnimatedCard style={[styles.statCard, {backgroundColor: Colors.infoLight}]} onPress={() => navigation.navigate('Hostels')}>
             <View style={styles.statContent}>
-               <Icon name="bed-empty" size={24} color="#1565c0" />
-               <Text style={[styles.statNumber, {color:'#1565c0'}]}>{stats?.vacantRooms || 0}</Text>
+               <Icon name="bed-empty" size={24} color={Colors.info} />
+               {loading && !refreshing ? <SkeletonLoader width={30} height={20} style={{ marginVertical: 4 }} /> : <Text style={[styles.statNumber, {color:Colors.info}]}>{stats?.vacantRooms || 0}</Text>}
                <Text style={styles.statLabel}>Vacant</Text>
             </View>
-          </Card>
-          <Card style={[styles.statCard, {backgroundColor: '#fff3e0'}]} onPress={() => navigation.navigate('Tenants')}>
+          </AnimatedCard>
+          <AnimatedCard style={[styles.statCard, {backgroundColor: Colors.warningLight}]} onPress={() => navigation.navigate('Tenants')}>
              <View style={styles.statContent}>
-               <Icon name="cash-clock" size={24} color="#ef6c00" />
-               <Text style={[styles.statNumber, {color:'#ef6c00'}]}>{stats?.unpaidTenants || 0}</Text>
+               <Icon name="cash-clock" size={24} color={Colors.warning} />
+               {loading && !refreshing ? <SkeletonLoader width={30} height={20} style={{ marginVertical: 4 }} /> : <Text style={[styles.statNumber, {color:Colors.warning}]}>{stats?.unpaidTenants || 0}</Text>}
                <Text style={styles.statLabel}>Unpaid</Text>
             </View>
-          </Card>
-           <Card style={[styles.statCard, {backgroundColor: '#fce4ec'}]} onPress={() => navigation.navigate('NoticeBoard')}>
+          </AnimatedCard>
+           <AnimatedCard style={[styles.statCard, {backgroundColor: Colors.dangerLight}]} onPress={() => navigation.navigate('Tenants')}>
              <View style={styles.statContent}>
-               <Icon name="alert-circle-outline" size={24} color="#c2185b" />
-               <Text style={[styles.statNumber, {color:'#c2185b'}]}>0</Text>
+               <Icon name="alert-circle-outline" size={24} color={Colors.danger} />
+               {loading && !refreshing ? <SkeletonLoader width={30} height={20} style={{ marginVertical: 4 }} /> : <Text style={[styles.statNumber, {color:Colors.danger}]}>{issuesCount}</Text>}
                <Text style={styles.statLabel}>Issues</Text>
             </View>
-          </Card>
+          </AnimatedCard>
+        </View>
+
+        {/* Quick Management Links */}
+        <Text variant="titleMedium" style={styles.sectionHeader}>Quick Manage</Text>
+        <View style={styles.statsRow}>
+          <AnimatedCard style={[styles.statCard, {backgroundColor: '#EEF2FF'}]} onPress={() => navigation.navigate('OwnerComplaints')}>
+            <View style={styles.statContent}>
+               <Icon name="clipboard-alert-outline" size={24} color="#4338CA" />
+               <Text style={[styles.statNumber, {color:'#4338CA', fontSize: 13}]}>Complaints</Text>
+               <Text style={styles.statLabel}>Manage</Text>
+            </View>
+          </AnimatedCard>
+          <AnimatedCard style={[styles.statCard, {backgroundColor: '#FFEDD5'}]} onPress={() => navigation.navigate('OwnerSupplyAlerts')}>
+            <View style={styles.statContent}>
+               <Icon name="package-variant-closed-alert" size={24} color="#EA580C" />
+               <Text style={[styles.statNumber, {color:'#EA580C', fontSize: 13}]}>Supplies</Text>
+               <Text style={styles.statLabel}>Alerts</Text>
+            </View>
+          </AnimatedCard>
+          <AnimatedCard style={[styles.statCard, {backgroundColor: '#D1FAE5'}]} onPress={() => navigation.navigate('NoticeBoard')}>
+            <View style={styles.statContent}>
+               <Icon name="bulletin-board" size={24} color="#059669" />
+               <Text style={[styles.statNumber, {color:'#059669', fontSize: 13}]}>Notices</Text>
+               <Text style={styles.statLabel}>Board</Text>
+            </View>
+          </AnimatedCard>
         </View>
 
         {/* Recent Notices */}
@@ -221,32 +278,28 @@ const OwnerDashboard = ({ navigation, route }) => {
            </TouchableOpacity>
         </View>
         
-        {/* Note: These are hardcoded UI cards. If you want dynamic notices, map over a fetched array here */}
-        <Card style={styles.noticeCard} mode="elevated">
-          <Card.Content style={styles.noticeContent}>
-            <View style={styles.noticeIconBox}>
-              <Icon name="wrench-clock" size={20} color="#fff" />
-            </View>
-            <View style={{flex:1}}>
-              <Text variant="titleSmall" style={{fontWeight:'bold'}}>Water Tank Cleaning</Text>
-              <Text variant="bodySmall" style={{color:'#757575'}}>Sunday at 10 AM.</Text>
-            </View>
-            <Text variant="labelSmall" style={{color:'#9e9e9e'}}>2h ago</Text>
-          </Card.Content>
-        </Card>
-
-        <Card style={styles.noticeCard} mode="elevated">
-          <Card.Content style={styles.noticeContent}>
-            <View style={[styles.noticeIconBox, {backgroundColor:'#4caf50'}]}>
-              <Icon name="party-popper" size={20} color="#fff" />
-            </View>
-            <View style={{flex:1}}>
-              <Text variant="titleSmall" style={{fontWeight:'bold'}}>New Year Event</Text>
-              <Text variant="bodySmall" style={{color:'#757575'}}>Menu updated.</Text>
-            </View>
-            <Text variant="labelSmall" style={{color:'#9e9e9e'}}>5h ago</Text>
-          </Card.Content>
-        </Card>
+        {loadingNotices && !refreshing ? (
+          <>
+            <SkeletonLoader width="100%" height={80} style={{ marginBottom: 12, borderRadius: 16 }} />
+            <SkeletonLoader width="100%" height={80} style={{ marginBottom: 12, borderRadius: 16 }} />
+          </>
+        ) : notices && notices.length > 0 ? (
+          notices.slice(0, 3).map((notice, index) => (
+            <Card key={notice.id || index} style={styles.noticeCard} mode="elevated">
+              <Card.Content style={styles.noticeContent}>
+                <View style={[styles.noticeIconBox, {backgroundColor: index % 2 === 0 ? '#f59e0b' : '#4caf50'}]}>
+                  <Icon name={index % 2 === 0 ? "bell-ring" : "alert-circle"} size={20} color="#fff" />
+                </View>
+                <View style={{flex:1}}>
+                  <Text variant="titleSmall" style={{fontWeight:'bold', color: '#333'}}>{notice.title}</Text>
+                  <Text variant="bodySmall" style={{color:'#757575'}} numberOfLines={1}>{notice.description}</Text>
+                </View>
+              </Card.Content>
+            </Card>
+          ))
+        ) : (
+          <Text style={{ textAlign: 'center', color: '#9e9e9e', marginVertical: 10 }}>No recent notices.</Text>
+        )}
 
       </ScrollView>
 
@@ -259,14 +312,14 @@ const OwnerDashboard = ({ navigation, route }) => {
       >
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text variant="titleLarge" style={{fontWeight:'bold'}}>Account</Text>
-            <IconButton icon="close" size={24} onPress={handleCloseProfile} />
+            <Text variant="titleLarge" style={{fontWeight:'bold', color: '#1A1A1A'}}>Account</Text>
+            <IconButton icon="close" size={24} iconColor="#1A1A1A" onPress={handleCloseProfile} />
           </View>
 
           <ScrollView contentContainerStyle={{padding: 20}}>
             <View style={styles.profileSection}>
               <View style={styles.profileImageContainer}>
-                <Avatar.Text size={80} label={userInitials} style={{backgroundColor: '#E3F2FD'}} color={mainBrandColor} />
+                <Avatar.Text size={80} label={userInitials} style={{backgroundColor: '#E3F2FD'}} color={Colors.primary} />
                 <TouchableOpacity style={styles.editIconBadge}>
                   <Icon name="pencil" size={14} color="#FFF" />
                 </TouchableOpacity>
@@ -282,6 +335,14 @@ const OwnerDashboard = ({ navigation, route }) => {
                 key={index} 
                 style={styles.menuItem} 
                 onPress={() => {
+                   if (item.action === 'support') {
+                     Alert.alert("Contact Support", "Phone: 9392973985\nEmail: kjayavenkatasairam@gmail.com");
+                     return;
+                   }
+                   if (item.action === 'privacy') {
+                     Alert.alert("Privacy & Security", "Your data is fully encrypted and securely stored. We prioritize your privacy and ensure your information is never shared without your explicit consent.");
+                     return;
+                   }
                    setProfileVisible(false);
                    navigation.setParams({ openProfile: null }); 
                    // Added try-catch wrapper in case the screen doesn't exist yet
@@ -294,7 +355,7 @@ const OwnerDashboard = ({ navigation, route }) => {
               >
                 <View style={styles.menuItemLeft}>
                   <Icon name={item.icon} size={24} color="#555" style={{marginRight: 15}} />
-                  <Text variant="bodyLarge" style={{fontWeight:'500'}}>{item.label}</Text>
+                  <Text variant="bodyLarge" style={{fontWeight:'500', color: '#333'}}>{item.label}</Text>
                 </View>
                 <Icon name="chevron-right" size={24} color="#CCC" />
               </TouchableOpacity>

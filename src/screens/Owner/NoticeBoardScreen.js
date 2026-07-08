@@ -1,18 +1,23 @@
-import React, { useState, useContext, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, RefreshControl } from 'react-native';
 import { Text, Card, Button, IconButton, Appbar, Searchbar } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useHostel } from '../../context/HostelContext';
+import { useNotices, useDeleteNotice } from '../../hooks/useQueries';
+import SkeletonLoader from '../../components/common/SkeletonLoader';
+import { Colors } from '../../theme/colors';
+
 const NoticeBoardScreen = ({ navigation }) => {
-  // Pull data and functions directly from Context!
-const { notices, fetchNotices, deleteNotice } = useHostel();
+  const { data: notices = [], refetch, isLoading } = useNotices();
+  const deleteNoticeMutation = useDeleteNotice();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All'); 
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch notices when screen mounts
-  useEffect(() => {
-    fetchNotices();
-  }, []);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };
 
   const handleDelete = (id) => {
     Alert.alert(
@@ -23,7 +28,7 @@ const { notices, fetchNotices, deleteNotice } = useHostel();
             { 
                 text: "Delete", 
                 style: "destructive", 
-                onPress: () => deleteNotice(id) // Call context function
+                onPress: () => deleteNoticeMutation.mutate(id) 
             }
         ]
     );
@@ -85,7 +90,10 @@ const { notices, fetchNotices, deleteNotice } = useHostel();
         <Appbar.Content title="Notices & Alerts" titleStyle={styles.headerTitle} />
       </Appbar.Header>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />}
+      >
         <Searchbar
           placeholder="Search notices..."
           onChangeText={setSearchQuery}
@@ -100,8 +108,8 @@ const { notices, fetchNotices, deleteNotice } = useHostel();
           style={styles.createButton}
           contentStyle={{ height: 48 }}
           labelStyle={{ fontSize: 16, fontWeight: 'bold' }}
-          // Notice we don't pass `addNewNotice` in params anymore!
           onPress={() => navigation.navigate('AddNotice')} 
+          buttonColor={Colors.primary}
         >
           New Notice
         </Button>
@@ -124,7 +132,13 @@ const { notices, fetchNotices, deleteNotice } = useHostel();
             )}
         </View>
 
-        {filteredNotices.length === 0 ? (
+        {isLoading && !refreshing ? (
+            <View style={{ marginTop: 20 }}>
+                <SkeletonLoader width="100%" height={120} style={{ marginBottom: 16, borderRadius: 12 }} />
+                <SkeletonLoader width="100%" height={120} style={{ marginBottom: 16, borderRadius: 12 }} />
+                <SkeletonLoader width="100%" height={120} style={{ marginBottom: 16, borderRadius: 12 }} />
+            </View>
+        ) : filteredNotices.length === 0 ? (
             <View style={{ alignItems: 'center', marginTop: 40 }}>
                 <MaterialCommunityIcons name="clipboard-text-off-outline" size={48} color="#ddd" />
                 <Text style={{ color: '#999', marginTop: 10 }}>No notices found.</Text>
@@ -170,7 +184,6 @@ const { notices, fetchNotices, deleteNotice } = useHostel();
                         <Text style={styles.description}>{item.description}</Text>
                         <View style={styles.cardFooter}>
                             <MaterialCommunityIcons name="clock-time-four-outline" size={14} color="#9E9E9E" />
-                            {/* Uses the displayDate we generated during upload */}
                             <Text style={styles.dateText}> {item.displayDate || 'Recently'}</Text>
                         </View>
                     </Card.Content>
@@ -185,11 +198,11 @@ const { notices, fetchNotices, deleteNotice } = useHostel();
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FAFAFA' },
   header: { backgroundColor: '#FAFAFA', elevation: 0 },
-  headerTitle: { fontWeight: 'bold', fontSize: 20 },
+  headerTitle: { fontWeight: 'bold', fontSize: 20, color: '#1A1A1A' },
   content: { padding: 16 },
 
   searchBar: { marginBottom: 16, backgroundColor: '#fff', borderRadius: 12, elevation: 2, height: 46 },
-  createButton: { backgroundColor: '#2962FF', borderRadius: 12, marginBottom: 20, elevation: 4 },
+  createButton: { borderRadius: 12, marginBottom: 20, elevation: 4 },
 
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
   statCard: { 
@@ -204,7 +217,7 @@ const styles = StyleSheet.create({
       borderColor: 'transparent',
       elevation: 2 
   },
-  statCardActive: { borderColor: '#2962FF', backgroundColor: '#F0F5FF' },
+  statCardActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   
   iconBox: { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   statCount: { fontSize: 18, fontWeight: 'bold', color: '#333' },

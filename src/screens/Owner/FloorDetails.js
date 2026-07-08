@@ -2,7 +2,11 @@ import React, { useState, useLayoutEffect, useEffect, useCallback } from 'react'
 import { View, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, FlatList, ActivityIndicator, Alert, RefreshControl } from 'react-native';
 import { Text, Button, IconButton, Surface, Chip, Avatar, List, SegmentedButtons, Portal, Dialog, TextInput, Switch } from 'react-native-paper'; 
 
-import { useHostel } from '../../context/HostelContext';
+import { useRoomsForFloor, useAddRoom } from '../../hooks/useQueries';
+import SkeletonLoader from '../../components/common/SkeletonLoader';
+import { Colors } from '../../theme/colors';
+import auth from '@react-native-firebase/auth';
+import { getComplaintsForOwner } from '../../services/complaintService';
 
 const FloorDetails = ({ navigation, route }) => {
   useLayoutEffect(() => {
@@ -14,10 +18,10 @@ const FloorDetails = ({ navigation, route }) => {
   const [activeFilter, setActiveFilter] = useState('All');
   const [maintenanceView, setMaintenanceView] = useState('pending');
   
-  // State for Live Rooms
-  const [rooms, setRooms] = useState([]);
-  const [loadingRooms, setLoadingRooms] = useState(true);
-  // NEW: Refresh State
+  // React Query Hooks
+  const { data: rooms = [], refetch, isLoading: loadingRooms } = useRoomsForFloor(blockName, floorId);
+  const addRoomMutation = useAddRoom();
+
   const [refreshing, setRefreshing] = useState(false);
 
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -26,24 +30,12 @@ const FloorDetails = ({ navigation, route }) => {
   const [newRoomSharing, setNewRoomSharing] = useState('2');
   const [newRoomAC, setNewRoomAC] = useState(false); 
 
-  const { getRoomsForFloor, addSingleRoom } = useHostel();
-
-  const fetchRooms = async () => {
-    const fetchedRooms = await getRoomsForFloor(blockName, floorId);
-    fetchedRooms.sort((a, b) => a.roomNumber - b.roomNumber);
-    setRooms(fetchedRooms);
-  };
-
-  useEffect(() => {
-    fetchRooms().then(() => setLoadingRooms(false));
-  }, [blockName, floorId]);
-
-  // NEW: Pull to refresh function
+  // Pull to refresh function
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchRooms();
+    await refetch();
     setRefreshing(false);
-  }, [blockName, floorId]);
+  }, [refetch]);
 
   const handleSaveRoom = async () => {
     if (!newRoomNum.trim()) {
@@ -53,12 +45,11 @@ const FloorDetails = ({ navigation, route }) => {
 
     setIsAdding(true);
     try {
-      await addSingleRoom(blockName, floorId, newRoomNum, newRoomSharing, newRoomAC);
+      await addRoomMutation.mutateAsync({ blockName, floorId, roomNumber: newRoomNum, sharing: newRoomSharing, hasAC: newRoomAC });
       setIsModalVisible(false);
       setNewRoomNum(''); 
       setNewRoomSharing('2'); 
       setNewRoomAC(false); 
-      await fetchRooms(); 
     } catch (error) {
       Alert.alert("Error", "Failed to add room.");
     } finally {
@@ -66,11 +57,35 @@ const FloorDetails = ({ navigation, route }) => {
     }
   };
 
-  const maintenanceRequests = [
-    { id: '1', type: 'Plumbing', room: '104', priority: 'High', status: 'Pending', staff: 'Unassigned', student: 'Rahul S.', time: '2h ago' },
-    { id: '2', type: 'Electrical', room: '112', priority: 'Medium', status: 'In-Progress', staff: 'Kumar (Electrician)', student: 'Amit K.', time: '5h ago' },
-    { id: '3', type: 'Cleaning', room: '108', priority: 'Low', status: 'Completed', staff: 'Suresh', student: 'Vijay P.', time: 'Yesterday' },
-  ];
+  const [maintenanceRequests, setMaintenanceRequests] = useState([]);
+
+  useEffect(() => {
+    const ownerId = auth().currentUser?.uid;
+    if (!ownerId) return;
+
+    const unsubscribe = getComplaintsForOwner(ownerId, (allComplaints) => {
+      const floorComplaints = allComplaints.filter(c => 
+        c.blockId === blockName && 
+        String(c.roomNumber).startsWith(String(floorId))
+      );
+      
+      const formatted = floorComplaints.map(c => ({
+        id: c.id,
+        type: c.category || c.title,
+        room: c.roomNumber,
+        priority: 'Normal',
+        status: c.status === 'Open' ? 'Pending' : (c.status === 'In Progress' ? 'In-Progress' : 'Completed'),
+        staff: c.assignedToName || 'Unassigned',
+        student: c.tenantName || 'Unknown',
+        time: c.createdAt ? c.createdAt.toDate().toLocaleDateString() : 'Just now'
+      }));
+      setMaintenanceRequests(formatted);
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [blockName, floorId]);
 
   const filteredRequests = maintenanceRequests.filter(req => 
     maintenanceView === 'pending' ? req.status !== 'Completed' : req.status === 'Completed'
@@ -131,16 +146,13 @@ const FloorDetails = ({ navigation, route }) => {
           <Text variant="titleLarge" style={styles.boldText}>Floor {floorId} Center</Text>
           <Text variant="bodySmall" style={styles.subText}>{blockName} • Management</Text>
         </View>
-        <TouchableOpacity style={styles.headerAction}>
-           <IconButton icon="dots-horizontal" size={24} iconColor="#1A1A1A" />
-        </TouchableOpacity>
       </View>
 
       <ScrollView 
         contentContainerStyle={styles.scroll} 
         showsVerticalScrollIndicator={false}
         // 🔥 NEW: Pull to refresh added
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#6200EE']} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />}
       >
         <Text variant="titleMedium" style={styles.sectionTitle}>Room Filters</Text>
         <View style={styles.filterRow}>
@@ -172,20 +184,22 @@ const FloorDetails = ({ navigation, route }) => {
               mode="contained-tonal" 
               icon="plus" 
               onPress={() => setIsModalVisible(true)}
-              buttonColor="#EDE9FE"
-              textColor="#6200EE"
+              buttonColor={Colors.primaryLight}
+              textColor={Colors.primary}
             >
               Add Room
             </Button>
           </View>
           
           {loadingRooms && !refreshing ? (
-             <View style={{ padding: 40, alignItems: 'center' }}>
-               <ActivityIndicator size="large" color="#6200EE" />
+             <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+               {[...Array(5)].map((_, i) => (
+                 <SkeletonLoader key={i} width="18%" height={60} style={{ marginBottom: 12, borderRadius: 14 }} />
+               ))}
              </View>
           ) : rooms.length > 0 ? (
             <FlatList
-              data={activeFilter === 'All' ? rooms : rooms.filter(r => r.sharing.toString() === activeFilter[0])}
+              data={activeFilter === 'All' ? rooms.sort((a, b) => a.roomNumber - b.roomNumber) : rooms.sort((a, b) => a.roomNumber - b.roomNumber).filter(r => r.sharing.toString() === activeFilter[0])}
               renderItem={renderRoom}
               keyExtractor={item => item.id.toString()}
               numColumns={5}
@@ -210,8 +224,7 @@ const FloorDetails = ({ navigation, route }) => {
             { value: 'resolved', label: 'Completed', icon: 'check-all' },
           ]}
           style={styles.toggle}
-          // FORCED COLOR FIX FOR DARK MODE OVERRIDE
-          theme={{ colors: { onSurface: '#1A1A1A', secondaryContainer: '#EDE9FE', onSecondaryContainer: '#6200EE' } }}
+          theme={{ colors: { onSurface: Colors.textDark, secondaryContainer: Colors.primaryLight, onSecondaryContainer: Colors.primary } }}
         />
 
         <Surface style={styles.maintenanceSurface} elevation={1}>
@@ -283,8 +296,7 @@ const FloorDetails = ({ navigation, route }) => {
                 { value: '3', label: '3 Share' },
                 { value: '4', label: '4 Share' },
               ]}
-              // FORCED COLOR FIX FOR DARK MODE OVERRIDE
-              theme={{ colors: { onSurface: '#1A1A1A', secondaryContainer: '#EDE9FE', onSecondaryContainer: '#6200EE' } }}
+          theme={{ colors: { onSurface: Colors.textDark, secondaryContainer: Colors.primaryLight, onSecondaryContainer: Colors.primary } }}
               style={{ marginBottom: 20 }}
             />
 
@@ -298,8 +310,8 @@ const FloorDetails = ({ navigation, route }) => {
 
           </Dialog.Content>
           <Dialog.Actions>
-            <Button onPress={() => setIsModalVisible(false)} textColor="#757575">Cancel</Button>
-            <Button onPress={handleSaveRoom} mode="contained" buttonColor="#6200EE" loading={isAdding}>Save Room</Button>
+            <Button onPress={() => setIsModalVisible(false)} textColor={Colors.textMedium}>Cancel</Button>
+            <Button onPress={handleSaveRoom} mode="contained" buttonColor={Colors.primary} loading={isAdding}>Save Room</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
@@ -320,10 +332,10 @@ const styles = StyleSheet.create({
   sectionTitle: { fontWeight: 'bold', color: '#1A1A1A', marginLeft: 4, marginVertical: 12 }, // FORCED
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 15 },
   chip: { marginRight: 8, marginBottom: 8, borderRadius: 10 },
-  activeChip: { backgroundColor: '#6200EE' },
-  inactiveChip: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EEE' },
+  activeChip: { backgroundColor: Colors.primary },
+  inactiveChip: { backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: Colors.border },
   chipText: { fontWeight: '600', fontSize: 12 },
-  gridSurface: { backgroundColor: '#FFF', borderRadius: 24, padding: 16, marginBottom: 20, elevation: 1 },
+  gridSurface: { backgroundColor: Colors.cardBg, borderRadius: 24, padding: 16, marginBottom: 20, elevation: 1 },
   gridHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
   legend: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4, marginLeft: 8 },

@@ -2,7 +2,9 @@ import React, { useCallback, memo, useState } from 'react';
 import { View, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Dimensions, RefreshControl, Alert } from 'react-native';
 import { Text, FAB, Surface, useTheme, Dialog, Avatar, Button, Portal } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useHostel } from '../../context/HostelContext';
+import { useBlocks, useDeleteBlock } from '../../hooks/useQueries';
+import SkeletonLoader from '../../components/common/SkeletonLoader';
+import { Colors } from '../../theme/colors';
 
 const { width } = Dimensions.get('window');
 
@@ -44,13 +46,14 @@ const HostelManagement = ({ navigation }) => {
   const [blockToDelete, setBlockToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const { blocks, deleteBlock, refreshDashboard } = useHostel();
+  const { data: blocks = [], refetch, isLoading } = useBlocks();
+  const deleteBlockMutation = useDeleteBlock();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refreshDashboard();
+    await refetch();
     setRefreshing(false);
-  }, [refreshDashboard]);
+  }, [refetch]);
 
   const handleLongPressBlock = (block) => {
     setBlockToDelete(block);
@@ -60,7 +63,7 @@ const HostelManagement = ({ navigation }) => {
   const confirmDeleteBlock = async () => {
     setIsDeleting(true);
     try {
-      await deleteBlock(blockToDelete.id, blockToDelete.name);
+      await deleteBlockMutation.mutateAsync({ blockId: blockToDelete.id, blockName: blockToDelete.name });
       setDeleteModalVisible(false);
       setBlockToDelete(null);
     } catch (error) {
@@ -81,26 +84,34 @@ const HostelManagement = ({ navigation }) => {
           <Text variant="headlineSmall" style={styles.title}>Hostel Blocks</Text>
           <Text variant="bodyMedium" style={styles.subtitle}>Long press a block to remove</Text>
         </View>
-        <Icon name="cog-outline" size={24} color="#555" />
       </Surface>
 
-      <FlatList
-        data={blocks}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={renderBlockItem}
-        numColumns={2}
-        contentContainerStyle={styles.list}
-        columnWrapperStyle={styles.columnWrapper}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#6200EE']} />
-        }
-        ListEmptyComponent={
-          <View style={{padding: 20, alignItems: 'center'}}>
-            <Text style={{color: '#94a3b8'}}>No blocks found. Add your first block!</Text>
-          </View>
-        }
-      />
+      {isLoading && !refreshing ? (
+        <View style={[styles.list, { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }]}>
+           <SkeletonLoader width={(width / 2) - 24} height={150} style={{ marginBottom: 15, borderRadius: 20 }} />
+           <SkeletonLoader width={(width / 2) - 24} height={150} style={{ marginBottom: 15, borderRadius: 20 }} />
+           <SkeletonLoader width={(width / 2) - 24} height={150} style={{ marginBottom: 15, borderRadius: 20 }} />
+           <SkeletonLoader width={(width / 2) - 24} height={150} style={{ marginBottom: 15, borderRadius: 20 }} />
+        </View>
+      ) : (
+        <FlatList
+          data={blocks}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderBlockItem}
+          numColumns={2}
+          contentContainerStyle={styles.list}
+          columnWrapperStyle={styles.columnWrapper}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />
+          }
+          ListEmptyComponent={
+            <View style={{padding: 20, alignItems: 'center'}}>
+              <Text style={{color: '#94a3b8'}}>No blocks found. Add your first block!</Text>
+            </View>
+          }
+        />
+      )}
 
       <Portal>
         <Dialog visible={deleteModalVisible} onDismiss={() => setDeleteModalVisible(false)} style={{ backgroundColor: '#FFF', borderRadius: 24 }}>
@@ -168,7 +179,7 @@ const styles = StyleSheet.create({
   cardContent: { marginTop: 10 },
   blockName: { fontSize: 17, fontWeight: 'bold', color: '#334155', marginBottom: 4 },
   blockDetails: { fontSize: 12, color: '#475569', fontWeight: '500' },
-  fab: { position: 'absolute', margin: 20, right: 0, bottom: 10, backgroundColor: '#6200EE', borderRadius: 30 },
+  fab: { position: 'absolute', margin: 20, right: 0, bottom: 10, backgroundColor: Colors.primary, borderRadius: 30 },
 });
 
 export default HostelManagement;

@@ -9,24 +9,25 @@ import {
   ScrollView,
   ImageBackground,
   StatusBar,
-  Alert
+  Alert,
+  LayoutAnimation,
+  UIManager,
+  Image
 } from 'react-native';
 import { TextInput, Button } from 'react-native-paper';
+import { Colors } from '../../theme/colors';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
-// THEME: Bright & Clean
-const THEME = {
-  primary: '#5D5FEF',      // Violet-Blue
-  textMain: '#2D2D2D',     
-  textSec: '#888888',      
-  cardBg: '#FFFFFF',       
-  inputBg: '#F5F5F5',      
-  google: '#DB4437',
-  apple: '#000000',
-};
+// THEME: Using global colors
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const LoginScreen = ({ navigation }) => {
   // --- STATE ---
@@ -49,6 +50,9 @@ const LoginScreen = ({ navigation }) => {
   }, []);
 
   // --- AUTH METHODS ---
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const isValidPhone = (phone) => /^\d{10,15}$/.test(phone);
+
   const routeUserByRole = async (uid) => {
     try {
       const userDoc = await firestore().collection('users').doc(uid).get();
@@ -69,6 +73,14 @@ const LoginScreen = ({ navigation }) => {
   const handleRegister = async () => {
     if (!email || !password || !fullName || !phone || !hostelName) {
       Alert.alert("Missing Information", "Please fill in all details to create your account.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      Alert.alert("Invalid Email", "Please enter a valid email address.");
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      Alert.alert("Invalid Phone", "Please enter a valid phone number (10-15 digits).");
       return;
     }
     setLoading(true);
@@ -108,6 +120,10 @@ const LoginScreen = ({ navigation }) => {
   const handleEmailLogin = async () => {
     if (!email || !password) {
       Alert.alert("Missing Information", "Please enter your email and password.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      Alert.alert("Invalid Email", "Please enter a valid email address.");
       return;
     }
     setLoading(true);
@@ -192,7 +208,12 @@ const LoginScreen = ({ navigation }) => {
             
             {/* Header Section */}
             <View style={styles.headerSection}>
-              <Text style={styles.appTitle}>Hostel Manager</Text>
+              <Image 
+                source={require('../../assets/logo.png')} 
+                style={styles.logoImage} 
+                resizeMode="contain" 
+              />
+              <Text style={styles.appTitle}>HOSTRO</Text>
               <Text style={styles.appTagline}>Smart Campus Living</Text>
             </View>
 
@@ -210,12 +231,13 @@ const LoginScreen = ({ navigation }) => {
                     placeholder="Full Name"
                     value={fullName}
                     onChangeText={setFullName}
+                    maxLength={50}
                     mode="outlined"
                     style={styles.input}
-                    textColor={THEME.textMain}
+                    textColor={Colors.textDark}
                     outlineColor="transparent"
-                    activeOutlineColor={THEME.primary}
-                    left={<TextInput.Icon icon="account-outline" color={THEME.textSec} />}
+                    activeOutlineColor={Colors.primary}
+                    left={<TextInput.Icon icon="account-outline" color={Colors.textMedium} />}
                     theme={{ roundness: 15 }} 
                   />
                   <TextInput
@@ -225,22 +247,23 @@ const LoginScreen = ({ navigation }) => {
                     keyboardType="phone-pad"
                     mode="outlined"
                     style={styles.input}
-                    textColor={THEME.textMain}
+                    textColor={Colors.textDark}
                     outlineColor="transparent"
-                    activeOutlineColor={THEME.primary}
-                    left={<TextInput.Icon icon="phone-outline" color={THEME.textSec} />}
+                    activeOutlineColor={Colors.primary}
+                    left={<TextInput.Icon icon="phone-outline" color={Colors.textMedium} />}
                     theme={{ roundness: 15 }} 
                   />
                   <TextInput
                     placeholder="Hostel / Business Name"
                     value={hostelName}
                     onChangeText={setHostelName}
+                    maxLength={50}
                     mode="outlined"
                     style={styles.input}
-                    textColor={THEME.textMain}
+                    textColor={Colors.textDark}
                     outlineColor="transparent"
-                    activeOutlineColor={THEME.primary}
-                    left={<TextInput.Icon icon="office-building-outline" color={THEME.textSec} />}
+                    activeOutlineColor={Colors.primary}
+                    left={<TextInput.Icon icon="office-building-outline" color={Colors.textMedium} />}
                     theme={{ roundness: 15 }} 
                   />
                 </>
@@ -255,11 +278,11 @@ const LoginScreen = ({ navigation }) => {
                 autoCapitalize="none"
                 mode="outlined"
                 style={styles.input}
-                textColor={THEME.textMain}
+                textColor={Colors.textDark}
                 outlineColor="transparent"
-                activeOutlineColor={THEME.primary}
-                left={<TextInput.Icon icon="email-outline" color={THEME.textSec} />}
-                theme={{ roundness: 15, colors: { onSurfaceVariant: THEME.textSec } }} 
+                activeOutlineColor={Colors.primary}
+                left={<TextInput.Icon icon="email-outline" color={Colors.textMedium} />}
+                theme={{ roundness: 15, colors: { onSurfaceVariant: Colors.textMedium } }} 
               />
 
               {/* Password Input */}
@@ -270,18 +293,18 @@ const LoginScreen = ({ navigation }) => {
                 secureTextEntry={!showPassword}
                 mode="outlined"
                 style={styles.input}
-                textColor={THEME.textMain}
+                textColor={Colors.textDark}
                 outlineColor="transparent"
-                activeOutlineColor={THEME.primary}
-                left={<TextInput.Icon icon="lock-outline" color={THEME.textSec} />}
+                activeOutlineColor={Colors.primary}
+                left={<TextInput.Icon icon="lock-outline" color={Colors.textMedium} />}
                 right={
                   <TextInput.Icon 
                     icon={showPassword ? "eye-off" : "eye"} 
-                    color={THEME.textSec} 
+                    color={Colors.textMedium} 
                     onPress={() => setShowPassword(!showPassword)} 
                   />
                 }
-                theme={{ roundness: 15, colors: { onSurfaceVariant: THEME.textSec } }}
+                theme={{ roundness: 15, colors: { onSurfaceVariant: Colors.textMedium } }}
               />
 
               {!isRegisterMode && (
@@ -305,7 +328,7 @@ const LoginScreen = ({ navigation }) => {
                     style={[styles.actionBtn, styles.loginBtn]}
                     contentStyle={styles.btnContent}
                     labelStyle={styles.btnLabel}
-                    buttonColor={THEME.primary}
+                    buttonColor={Colors.primary}
                   >
                     Create Account
                   </Button>
@@ -318,36 +341,39 @@ const LoginScreen = ({ navigation }) => {
                     style={[styles.actionBtn, styles.loginBtn]}
                     contentStyle={styles.btnContent}
                     labelStyle={styles.btnLabel}
-                    buttonColor={THEME.primary}
+                    buttonColor={Colors.primary}
                   >
                     Login
                   </Button>
                 )}
               </View>
 
-              {/* 🔥 Toggle Register/Login Mode */}
               <TouchableOpacity 
                 style={styles.toggleModeBtn} 
-                onPress={() => setIsRegisterMode(!isRegisterMode)}
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setIsRegisterMode(!isRegisterMode);
+                }}
               >
                 <Text style={styles.toggleModeText}>
                   {isRegisterMode ? "Already have an account? Login" : "New here? Create an Account"}
                 </Text>
               </TouchableOpacity>
 
-              {/* Social Section */}
-              <View style={styles.socialSection}>
-                <Text style={styles.socialText}>Or login with</Text>
-                <View style={styles.socialRow}>
-                  <TouchableOpacity style={styles.socialBtn} onPress={() => handleSocialLogin('Google')} disabled={loading}>
-                    <MaterialCommunityIcons name="google" size={22} color={THEME.google} />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.socialBtn} onPress={() => handleSocialLogin('Apple')} disabled={loading}>
-                    <MaterialCommunityIcons name="apple" size={22} color={THEME.apple} />
-                  </TouchableOpacity>
+              {/* Social Login */}
+              {!isRegisterMode && (
+                <View style={styles.socialSection}>
+                  <Text style={styles.socialText}>Or continue with</Text>
+                  <View style={styles.socialRow}>
+                    <TouchableOpacity style={styles.socialBtn} onPress={() => handleSocialLogin('Google')}>
+                      <MaterialCommunityIcons name="google" size={24} color="#DB4437" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.socialBtn} onPress={() => handleSocialLogin('Apple')}>
+                      <MaterialCommunityIcons name="apple" size={24} color="#000000" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              )}
 
             </View>
           </ScrollView>
@@ -370,27 +396,28 @@ const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)' },
   scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   headerSection: { alignItems: 'center', marginBottom: 30, marginTop: 40 },
-  appTitle: { fontSize: 28, fontWeight: 'bold', color: THEME.primary, letterSpacing: 0.5 },
-  appTagline: { fontSize: 14, color: THEME.textSec, marginTop: 5, fontWeight: '600' },
-  whiteCard: { backgroundColor: 'rgba(255, 255, 255, 0.97)', borderRadius: 24, padding: 24, elevation: 5 },
-  welcomeText: { fontSize: 22, fontWeight: 'bold', color: THEME.textMain, marginBottom: 24, textAlign: 'center' },
-  input: { backgroundColor: THEME.inputBg, marginBottom: 14, height: 50 },
+  appTitle: { fontSize: 28, fontWeight: 'bold', color: Colors.primary, letterSpacing: 0.5 },
+  appTagline: { fontSize: 14, color: Colors.textMedium, marginTop: 5, fontWeight: '600' },
+  whiteCard: { backgroundColor: Colors.cardBg, borderRadius: 24, padding: 24, elevation: 5, shadowColor: Colors.primaryDark, shadowOpacity: 0.1, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
+  welcomeText: { fontSize: 22, fontWeight: 'bold', color: Colors.textDark, marginBottom: 24, textAlign: 'center' },
+  logoImage: { width: 80, height: 80, marginBottom: 10 },
+  input: { backgroundColor: Colors.inputBg, marginBottom: 14 },
   forgotPassContainer: { alignItems: 'flex-end', marginBottom: 20, marginTop: -5 },
-  forgotPassText: { color: THEME.primary, fontWeight: '600', fontSize: 13 },
+  forgotPassText: { color: Colors.primary, fontWeight: '600', fontSize: 13 },
   actionRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   actionBtn: { flex: 1, borderRadius: 30, elevation: 2, marginBottom: 0 },
   loginBtn: { },
   btnContent: { height: 50 },
   btnLabel: { fontSize: 16, fontWeight: 'bold' },
   toggleModeBtn: { alignItems: 'center', marginBottom: 25 },
-  toggleModeText: { color: THEME.primary, fontWeight: '600', fontSize: 14 },
+  toggleModeText: { color: Colors.primary, fontWeight: '600', fontSize: 14 },
   socialSection: { alignItems: 'center' },
-  socialText: { color: THEME.textSec, fontWeight: '500', marginBottom: 15, fontSize: 13 },
+  socialText: { color: Colors.textMedium, fontWeight: '500', marginBottom: 15, fontSize: 13 },
   socialRow: { flexDirection: 'row', width: '100%', justifyContent: 'center', gap: 20 },
-  socialBtn: { backgroundColor: '#fff', width: 45, height: 45, borderRadius: 25, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
+  socialBtn: { backgroundColor: '#fff', width: 45, height: 45, borderRadius: 25, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
   footer: { flexDirection: 'row', justifyContent: 'center', padding: 20 },
   footerText: { fontSize: 14, color: '#FFF', fontWeight: '500', textShadowColor: 'rgba(0, 0, 0, 0.75)', textShadowOffset: {width: -1, height: 1}, textShadowRadius: 10 },
-  footerLink: { fontSize: 14, fontWeight: 'bold', color: THEME.primary, textShadowColor: 'rgba(255, 255, 255, 0.75)', textShadowOffset: {width: 0, height: 0}, textShadowRadius: 10 },
+  footerLink: { fontSize: 14, fontWeight: 'bold', color: Colors.primaryLight, textShadowColor: 'rgba(0, 0, 0, 0.75)', textShadowOffset: {width: -1, height: 1}, textShadowRadius: 10 },
 });
 
 export default LoginScreen;

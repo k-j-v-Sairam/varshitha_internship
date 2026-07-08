@@ -1,14 +1,16 @@
 import React, { useState, useContext } from 'react';
 import { View, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { Text, TextInput, Button, Chip, Appbar, SegmentedButtons } from 'react-native-paper';
-import { useHostel } from '../../context/HostelContext';
+import { useAddNotice } from '../../hooks/useQueries';
+import { Colors } from '../../theme/colors';
 
 const AddNotice = ({ navigation }) => {
-const { addNotice } = useHostel();  
+  const addNoticeMutation = useAddNotice();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('General');
   const [priority, setPriority] = useState('Low');
+  const [targetAudience, setTargetAudience] = useState('All');
   const [loading, setLoading] = useState(false); // Add loading state
 
   const categories = ['Maintenance', 'Payment', 'Event', 'Holiday', 'General'];
@@ -28,11 +30,12 @@ const { addNotice } = useHostel();
         description,
         priority,
         type: category,
+        targetAudience,
         // formatted string for quick UI display (optional, but keeps your current UI intact)
         displayDate: `Posted: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
       };
 
-      await addNotice(noticeData); // Push to Firebase
+      await addNoticeMutation.mutateAsync(noticeData); // Push to Firebase
       navigation.goBack();
       
     } catch (error) {
@@ -86,6 +89,21 @@ const { addNotice } = useHostel();
           style={styles.segment}
         />
 
+        <Text style={styles.label}>Audience</Text>
+        <View style={styles.chipRow}>
+            {['All', 'Tenants', 'Staff'].map((aud) => (
+                <Chip
+                    key={aud}
+                    selected={targetAudience === aud}
+                    onPress={() => setTargetAudience(aud)}
+                    showSelectedOverlay
+                    style={styles.chip}
+                >
+                    {aud === 'All' ? '👥 Everyone' : aud === 'Tenants' ? '🏠 Tenants Only' : '👷 Staff Only'}
+                </Chip>
+            ))}
+        </View>
+
         <Text style={styles.label}>Description</Text>
         <TextInput
           mode="outlined"
@@ -112,16 +130,16 @@ const { addNotice } = useHostel();
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  header: { backgroundColor: '#fff', elevation: 0 },
+  container: { flex: 1, backgroundColor: Colors.background },
+  header: { backgroundColor: Colors.background, elevation: 0 },
   content: { padding: 20 },
-  label: { fontSize: 14, fontWeight: 'bold', color: '#616161', marginBottom: 8, marginTop: 12 },
-  input: { backgroundColor: '#fff', marginBottom: 8 },
-  textArea: { backgroundColor: '#fff', marginBottom: 24 },
+  label: { fontSize: 14, fontWeight: 'bold', color: Colors.textMedium, marginBottom: 8, marginTop: 12 },
+  input: { backgroundColor: Colors.cardBg, marginBottom: 8 },
+  textArea: { backgroundColor: Colors.cardBg, marginBottom: 24 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   chip: { marginRight: 4, marginBottom: 4 },
   segment: { marginBottom: 8 },
-  button: { marginTop: 12, borderRadius: 8, backgroundColor: '#6200EE' },
+  button: { marginTop: 12, borderRadius: 8, backgroundColor: Colors.primary },
 });
 
 export default AddNotice;
