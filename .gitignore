@@ -32,7 +32,10 @@ local.properties
 *.hprof
 .cxx/
 *.keystore
-!debug.keystore
+
+# Google Services
+google-services.json
+GoogleService-Info.plist
 .kotlin/
 
 # node.js

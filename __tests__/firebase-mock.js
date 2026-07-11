@@ -9,7 +9,7 @@ if (!getApps().length) {
     appId: "1:113753128245:android:d4115ae3a49bde2ca9a07c",
     databaseURL: "https://hostelmanager-bdfdb-default-rtdb.asia-southeast1.firebasedatabase.app",
     storageBucket: "hostelmanager-bdfdb.appspot.com",
-    apiKey: "AIzaSyBPi3SrUDxbTJSwcwu0LpXylrMYs6PuEIE",
+    apiKey: "mock-api-key-for-testing",
     authDomain: "hostelmanager-bdfdb.firebaseapp.com",
   });
 } else {
